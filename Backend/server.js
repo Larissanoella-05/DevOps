@@ -8,7 +8,7 @@ const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, "../frontend")));
+app.use(express.static(path.join(__dirname, "../Frontend")));
 
 initDatabase()
   .then(({ query, run }) => {
@@ -72,7 +72,7 @@ initDatabase()
     });
 
     app.get("*", (_req, res) => {
-      res.sendFile(path.join(__dirname, "../frontend/index.html"));
+      res.sendFile(path.join(__dirname, "../Frontend/index.html"));
     });
 
     app.listen(PORT, () => {
