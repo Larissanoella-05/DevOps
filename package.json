@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "description": "Agricultural crop price tracker for farmers and traders",
   "scripts": {
-    "install:backend": "cd backend && npm install",
-    "start": "cd backend && node server.js",
-    "dev": "cd backend && npm run dev"
+    "install:backend": "cd Backend && npm install",
+    "start": "cd Backend && node server.js",
+    "dev": "cd Backend && npm run dev"
   },
   "keywords": [
     "agriculture",
