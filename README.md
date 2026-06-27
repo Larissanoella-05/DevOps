@@ -11,6 +11,15 @@ because they lack access to current market information. Traders exploit
 this information gap. AgriPulse bridges this gap by providing a simple,
 accessible platform to view and compare crop prices across different markets.
 
+##  Team
+
+| Name | GitHub | Role |
+|------|--------|------|
+| OJ | @oj | Team Lead & Documentation  |
+| Larissa | @larissa | Repo Admin & Design |
+| Emerance | @emerance | Project Planning |
+| Joshua | @joshua | Backend & Codebase |
+
 ## Target Users
 
 - Smallholder farmers in Rwanda and East Africa
@@ -103,14 +112,7 @@ The database is created and seeded automatically on first run.
 }
 ```
 
-##  Team
 
-| Name | GitHub | Role |
-|------|--------|------|
-| OJ | @oj | Team Lead & Documentation  |
-| Larissa | @larissa | Repo Admin & Design |
-| Emerance | @emerance | Project Planning |
-| Joshua | @joshua | Backend & Codebase |
 
 ##  License
 
