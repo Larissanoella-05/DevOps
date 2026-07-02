@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  agripulse:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    volumes:
+      - agripulse-data:/app/backend
+    restart: unless-stopped
+
+volumes:
+  agripulse-data:
