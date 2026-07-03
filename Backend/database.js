@@ -2,14 +2,15 @@ const initSqlJs = require("sql.js");
 const fs = require("fs");
 const path = require("path");
 
-const DB_PATH = process.env.DB_PATH || path.join(__dirname, "agripulse.db");
+const DEFAULT_DB_PATH = process.env.DB_PATH || path.join(__dirname, "agripulse.db");
 
-async function initDatabase() {
+
+async function initDatabase(dbPath = DEFAULT_DB_PATH) {
   const SQL = await initSqlJs();
 
   let db;
-  if (fs.existsSync(DB_PATH)) {
-    const fileBuffer = fs.readFileSync(DB_PATH);
+  if (fs.existsSync(dbPath)) {
+    const fileBuffer = fs.readFileSync(dbPath);
     db = new SQL.Database(fileBuffer);
     console.log(" Loaded existing database from disk.");
   } else {
@@ -19,7 +20,7 @@ async function initDatabase() {
 
   function save() {
     const data = db.export();
-    fs.writeFileSync(DB_PATH, Buffer.from(data));
+    fs.writeFileSync(dbPath, Buffer.from(data));
   }
 
   db.run(`
