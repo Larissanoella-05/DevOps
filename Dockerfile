@@ -9,7 +9,8 @@
 # ==========================================================================
 
 # ---- Stage 1: install production dependencies ----------------------------
-# Pinned to Node 18 (the app requires v18+) on Alpine for a small footprint.
+# Pinned to Node 22 (matches the version CI lints/tests against) on Alpine
+# for a small footprint.
 FROM node:22-alpine AS deps
 
 # All backend code lives under /app/Backend, so install deps there.
