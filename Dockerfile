@@ -10,7 +10,7 @@
 
 # ---- Stage 1: install production dependencies ----------------------------
 # Pinned to Node 18 (the app requires v18+) on Alpine for a small footprint.
-FROM node:18-alpine AS deps
+FROM node:22-alpine AS deps
 
 # All backend code lives under /app/Backend, so install deps there.
 WORKDIR /app/Backend
@@ -25,7 +25,7 @@ RUN npm ci --omit=dev
 
 
 # ---- Stage 2: runtime ----------------------------------------------------
-FROM node:18-alpine AS runtime
+FROM node:22-alpine AS runtime
 
 # Production defaults; PORT can be overridden by docker-compose or `-e`.
 ENV NODE_ENV=production \
