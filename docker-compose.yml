@@ -1,18 +1,63 @@
-version: '3.8'
+# AgriPulse — local development & deployment stack.
+# Bring the whole app up with a single command:  docker-compose up
 
 services:
   agripulse:
+    # Build the application image from the Dockerfile in this directory.
     build:
       context: .
       dockerfile: Dockerfile
+    image: agripulse:latest
+    container_name: agripulse
+
+    # Restart policy: bring the app back after crashes and host reboots.
+    restart: unless-stopped
+
+    # Publish the port. Host port is overridable via ${PORT} (default 3000);
+    # the container always listens on 3000.
     ports:
-      - "3000:3000"
+      - "${PORT:-3000}:3000"
+
+    # Environment variables the app reads at runtime.
     environment:
       - NODE_ENV=production
       - PORT=3000
+      - DB_PATH=/app/data/agripulse.db
+
+    # Named volume for data persistence — the SQLite file survives restarts,
+    # rebuilds, and `docker-compose down`.
     volumes:
-      - agripulse-data:/app/Backend
-    restart: unless-stopped
+      - agripulse-data:/app/data
+
+    # Dedicated network for this stack.
+    networks:
+      - agripulse-net
+
+    # Health check: container is only "healthy" once the API answers requests.
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/prices', r => process.exit(r.statusCode < 400 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    # Resource limits so a runaway process can't starve the host.
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+
+    # Rotate container logs so they don't grow without bound.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  agripulse-net:
+    driver: bridge
 
 volumes:
   agripulse-data:

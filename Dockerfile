@@ -44,6 +44,10 @@ COPY --chown=node:node Frontend ./Frontend
 # so it always wins over anything that may have tagged along with the source.
 COPY --chown=node:node --from=deps /app/Backend/node_modules ./Backend/node_modules
 
+# Create a writable data directory for the SQLite database. Owned by `node`
+# so it stays writable once the compose named volume is mounted here.
+RUN mkdir -p /app/data && chown node:node /app/data
+
 # Drop root: run everything as the unprivileged `node` user for security.
 USER node
 
