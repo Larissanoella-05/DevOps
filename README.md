@@ -37,40 +37,52 @@ accessible platform to view and compare crop prices across different markets.
 
 ## Technology Stack
 
-| Layer    | Technology              |
-| -------- | ----------------------- |
-| Runtime  | Node.js v18+            |
-| Server   | Express.js              |
-| Database | SQLite (sql.js)         |
-| Frontend | Vanilla HTML / CSS / JS |
+| Layer            | Technology                        |
+| ---------------- | ---------------------------------- |
+| Runtime          | Node.js v22                        |
+| Server           | Express.js                         |
+| Database         | SQLite (sql.js)                    |
+| Frontend         | Vanilla HTML / CSS / JS            |
+| Linting          | ESLint                             |
+| Testing          | Node.js built-in `node:test`       |
+| Git hooks        | Husky + commitlint                 |
+| Containerization | Docker + Docker Compose            |
+| CI               | GitHub Actions                     |
 
 ## Project Structure
 
-agripulse/
-
-├── backend/
-
-│ ├── server.js # Express server & API routes
-
-│ ├── database.js # SQLite setup and seeding
-
-│ └── package.json
-
-├── frontend/
-
-│ ├── index.html # Main UI
-
-│ ├── style.css # Responsive styles
-
-│ └── app.js # API calls and rendering
-
-├── .gitignore
-
+```
+DevOps/
+├── README.md
 ├── LICENSE
+├── package.json              # root scripts (lint/test) + eslint/husky/commitlint devDeps
+├── package-lock.json
+├── eslint.config.js           # lint rules for Backend (Node) and Frontend (browser)
+├── commitlint.config.js       # enforces Conventional Commits on every commit message
+├── Dockerfile                  # multi-stage build, non-root user, health check
+├── docker-compose.yml          # single-command local run, named volume, health check
+├── .dockerignore
+├── .gitignore
+├── .husky/
+│   ├── pre-commit             # runs `npm run lint` before every commit
+│   └── commit-msg             # validates commit message format via commitlint
+├── .github/
+│   ├── PULL_REQUEST_TEMPLATE.md
+│   └── workflows/
+│       └── ci.yml              # lint → test → build & push Docker image
+├── Backend/
+│   ├── server.js               # Express app & API routes
+│   ├── database.js             # sql.js init, seed data, query/run helpers
+│   ├── package.json
+│   └── tests/
+│       └── database.test.js
+└── Frontend/
+    ├── index.html
+    ├── styles.css
+    └── app.js
+```
 
-└── README.md
-
-## How to Run Locally
+## How to Run Locally (without Docker)
 
 ### Prerequisites
 
@@ -80,21 +92,76 @@ agripulse/
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/<your-org>/agripulse.git
-cd agripulse
+git clone https://github.com/Larissanoella-05/DevOps.git
+cd DevOps
 
-# 2. Install dependencies
-cd backend
+# 2. Install dependencies (root tooling + backend)
 npm install
+npm run install:backend
 
 # 3. Start the server
-node server.js
+npm start
 
 # 4. Open in browser
 # Visit http://localhost:3000
 ```
 
 The database is created and seeded automatically on first run.
+
+## Running with Docker
+
+### Prerequisites
+
+- [Docker](https://docs.docker.com/get-docker/) with the Compose plugin (`docker compose version` should work)
+
+### Quick start
+
+```bash
+docker compose up -d --build
+curl http://localhost:3000/api/prices   # seeded crop price data
+```
+
+Open `http://localhost:3000` in a browser for the UI. Stop with `docker compose down` (data persists in a named volume) or `docker compose down -v` (also deletes the data volume).
+
+If port `3000` is already in use on your machine:
+
+```bash
+PORT=3010 docker compose up -d --build
+```
+
+### What's in the image
+
+- Multi-stage build (`deps` → `runtime`) — devDependencies never ship in the final image
+- Runs as the non-root `node` user
+- Data persists via the `agripulse-data` named volume, mounted at `/app/data`
+- Health check polls the API so the container only reports "healthy" once it's actually serving requests
+
+### Building/running without Compose
+
+```bash
+docker build -t agripulse .
+docker run -d -p 3000:3000 --name agripulse agripulse
+```
+
+## Linting & Tests
+
+```bash
+npm run lint     # ESLint across Backend/ and Frontend/
+npm test          # Backend unit tests (node:test)
+```
+
+Both run automatically via a Husky `pre-commit` hook (lint) before every local commit, and again in CI on every push/PR.
+
+## Continuous Integration
+
+Every push to a non-`main` branch, and every pull request targeting `main`, runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
+
+1. **Install dependencies** — root and `Backend/`
+2. **Run linter** — `npm run lint`
+3. **Run tests** — `npm test`
+4. **Build and push Docker image** — to GitHub Container Registry (`ghcr.io`), tagged with the commit SHA
+
+All steps must pass before a PR can merge into `main` (enforced via branch protection's required status checks).
 
 ## API Endpoints
 
