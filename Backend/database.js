@@ -4,6 +4,7 @@ const path = require("path");
 
 const DEFAULT_DB_PATH = process.env.DB_PATH || path.join(__dirname, "agripulse.db");
 
+
 async function initDatabase(dbPath = DEFAULT_DB_PATH) {
   const SQL = await initSqlJs();
 
