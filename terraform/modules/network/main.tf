@@ -1,39 +1,16 @@
-# VPC with a single public subnet the application VM lives in.
+# Virtual network with a single subnet the application VM lives in.
 
-resource "aws_vpc" "this" {
-  cidr_block           = var.vpc_cidr
-  enable_dns_support   = true
-  enable_dns_hostnames = true
-
-  tags = { Name = "${var.name}-vpc" }
+resource "azurerm_virtual_network" "this" {
+  name                = "${var.name}-vnet"
+  location            = var.location
+  resource_group_name = var.resource_group_name
+  address_space       = [var.vnet_cidr]
+  tags                = var.tags
 }
 
-resource "aws_subnet" "public" {
-  vpc_id                  = aws_vpc.this.id
-  cidr_block              = var.subnet_cidr
-  map_public_ip_on_launch = true
-
-  tags = { Name = "${var.name}-public-subnet" }
-}
-
-resource "aws_internet_gateway" "this" {
-  vpc_id = aws_vpc.this.id
-
-  tags = { Name = "${var.name}-igw" }
-}
-
-resource "aws_route_table" "public" {
-  vpc_id = aws_vpc.this.id
-
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.this.id
-  }
-
-  tags = { Name = "${var.name}-public-rt" }
-}
-
-resource "aws_route_table_association" "public" {
-  subnet_id      = aws_subnet.public.id
-  route_table_id = aws_route_table.public.id
+resource "azurerm_subnet" "this" {
+  name                 = "${var.name}-subnet"
+  resource_group_name  = var.resource_group_name
+  virtual_network_name = azurerm_virtual_network.this.name
+  address_prefixes     = [var.subnet_cidr]
 }
