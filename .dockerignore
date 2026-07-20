@@ -1,0 +1,35 @@
+# Version control
+.git
+.gitignore
+
+# Installed dependencies 
+node_modules
+**/node_modules
+
+# Local SQLite database 
+**/*.db
+**/*.db-shm
+**/*.db-wal
+
+# CI / DevOps config 
+.github
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Environment & secrets
+.env
+.env.*
+*.env
+
+# Docs
+README.md
+LICENSE
+
+# Editor / OS / logs
+.vscode
+.idea
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
