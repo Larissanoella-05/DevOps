@@ -1,38 +1,53 @@
-# Look up the latest Ubuntu 22.04 image so we never pin a region-specific AMI.
-data "aws_ami" "ubuntu" {
-  most_recent = true
-  owners      = [var.ami_owner]
+# Public IP, network interface, and the Ubuntu VM that runs the AgriPulse container.
 
-  filter {
-    name   = "name"
-    values = [var.ami_name_filter]
-  }
-
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
-  }
+resource "azurerm_public_ip" "this" {
+  name                = "${var.name}-pip"
+  location            = var.location
+  resource_group_name = var.resource_group_name
+  allocation_method   = "Static"
+  sku                 = "Standard"
+  tags                = var.tags
 }
 
-resource "aws_key_pair" "this" {
-  key_name   = "${var.name}-key"
-  public_key = file(pathexpand(var.ssh_public_key_path))
+resource "azurerm_network_interface" "this" {
+  name                = "${var.name}-nic"
+  location            = var.location
+  resource_group_name = var.resource_group_name
+
+  ip_configuration {
+    name                          = "internal"
+    subnet_id                     = var.subnet_id
+    private_ip_address_allocation = "Dynamic"
+    public_ip_address_id          = azurerm_public_ip.this.id
+  }
+
+  tags = var.tags
 }
 
-resource "aws_instance" "app" {
-  ami                    = data.aws_ami.ubuntu.id
-  instance_type          = var.instance_type
-  subnet_id              = var.subnet_id
-  vpc_security_group_ids = [var.security_group_id]
-  key_name               = aws_key_pair.this.key_name
+resource "azurerm_linux_virtual_machine" "app" {
+  name                  = "${var.name}-vm"
+  location              = var.location
+  resource_group_name   = var.resource_group_name
+  size                  = var.vm_size
+  admin_username        = var.admin_username
+  network_interface_ids = [azurerm_network_interface.this.id]
 
-  root_block_device {
-    encrypted = true
+  admin_ssh_key {
+    username   = var.admin_username
+    public_key = file(pathexpand(var.ssh_public_key_path))
   }
 
-  metadata_options {
-    http_tokens = "required" # require IMDSv2
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Standard_LRS"
   }
 
-  tags = { Name = "${var.name}-vm" }
+  source_image_reference {
+    publisher = var.image_publisher
+    offer     = var.image_offer
+    sku       = var.image_sku
+    version   = "latest"
+  }
+
+  tags = var.tags
 }
