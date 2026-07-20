@@ -10,25 +10,25 @@ variable "environment" {
   default     = "dev"
 }
 
-variable "region" {
-  description = "Cloud region to deploy into."
+variable "location" {
+  description = "Azure region to deploy into."
   type        = string
 }
 
-variable "vpc_cidr" {
-  description = "CIDR block for the VPC."
+variable "vnet_cidr" {
+  description = "CIDR block for the virtual network."
   type        = string
   default     = "10.0.0.0/16"
 }
 
 variable "subnet_cidr" {
-  description = "CIDR block for the public subnet the VM lives in."
+  description = "CIDR block for the subnet the VM lives in."
   type        = string
   default     = "10.0.1.0/24"
 }
 
-variable "instance_type" {
-  description = "Compute instance size for the application VM."
+variable "vm_size" {
+  description = "Azure VM size for the application server."
   type        = string
 }
 
@@ -39,9 +39,15 @@ variable "app_port" {
 }
 
 variable "ssh_ingress_cidr" {
-  description = "CIDR range allowed to reach SSH (port 22). Restrict this in production."
+  description = "Source prefix allowed to reach SSH (port 22). A CIDR, or \"*\" for any. Restrict this in production."
   type        = string
-  default     = "0.0.0.0/0"
+  default     = "*"
+}
+
+variable "admin_username" {
+  description = "Admin username for the Linux VM."
+  type        = string
+  default     = "ubuntu"
 }
 
 variable "ssh_public_key_path" {
