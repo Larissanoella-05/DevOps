@@ -1,33 +1,42 @@
-# Security group: allow SSH (22) and the app port inbound, deny the rest.
+# Network security group: allow SSH (22) and the app port inbound, deny the rest.
+# Azure adds an implicit DenyAllInbound rule at the lowest priority, so anything
+# not explicitly allowed here is blocked.
 
-resource "aws_security_group" "app" {
-  name        = "${var.name}-sg"
-  description = "Allow SSH and AgriPulse app traffic"
-  vpc_id      = var.vpc_id
+resource "azurerm_network_security_group" "app" {
+  name                = "${var.name}-nsg"
+  location            = var.location
+  resource_group_name = var.resource_group_name
 
-  ingress {
-    description = "SSH access"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = [var.ssh_ingress_cidr]
+  security_rule {
+    name                       = "allow-ssh"
+    description                = "SSH access"
+    priority                   = 1001
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "22"
+    source_address_prefix      = var.ssh_ingress_cidr
+    destination_address_prefix = "*"
   }
 
-  ingress {
-    description = "AgriPulse app"
-    from_port   = var.app_port
-    to_port     = var.app_port
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+  security_rule {
+    name                       = "allow-app"
+    description                = "AgriPulse app"
+    priority                   = 1002
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = tostring(var.app_port)
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
   }
 
-  egress {
-    description = "Allow all outbound"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+  tags = var.tags
+}
 
-  tags = { Name = "${var.name}-sg" }
+resource "azurerm_subnet_network_security_group_association" "this" {
+  subnet_id                 = var.subnet_id
+  network_security_group_id = azurerm_network_security_group.app.id
 }
