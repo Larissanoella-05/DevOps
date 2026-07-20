@@ -1,13 +1,13 @@
 # AgriPulse — Terraform Infrastructure
 
 Infrastructure as Code for the AgriPulse app. Terraform provisions the network,
-a compute VM to run the Docker container, and the security rules around it on AWS.
+a compute VM to run the Docker container, and the security rules around it on Azure.
 
 ## Prerequisites
 
 - [Terraform](https://developer.hashicorp.com/terraform/install) >= 1.5
-- AWS credentials configured (`aws configure`, or `AWS_ACCESS_KEY_ID` /
-  `AWS_SECRET_ACCESS_KEY` environment variables)
+- [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) — sign in
+  with `az login`. Terraform reuses that session, so no cloud keys live in the repo.
 - An SSH key pair. The **public** key path goes in `terraform.tfvars`
   (`ssh_public_key_path`); the matching private key is what Ansible uses later.
   Generate one with `ssh-keygen -t rsa -b 4096` if you don't have it.
@@ -16,14 +16,14 @@ a compute VM to run the Docker container, and the security rules around it on AW
 
 ```
 terraform/
-├── main.tf            # provider, backend, module composition
+├── main.tf            # provider, backend, resource group, module composition
 ├── variables.tf       # input variables (no hardcoded values)
 ├── outputs.tf         # exposed IPs and resource IDs
 ├── terraform.tfvars   # actual values for this deployment
 └── modules/
-    ├── network/       # VPC, public subnet, internet gateway, routing
-    ├── security/      # security group: SSH (22) + app port, deny rest
-    └── compute/       # Ubuntu VM + key pair
+    ├── network/       # virtual network + subnet
+    ├── security/      # network security group: SSH (22) + app port, deny rest
+    └── compute/       # public IP + network interface + Ubuntu VM
 ```
 
 ## Usage
@@ -31,16 +31,19 @@ terraform/
 ```bash
 cd terraform
 
-# 1. Download providers and initialise the working directory
+# 1. Sign in to Azure (once per session)
+az login
+
+# 2. Download providers and initialise the working directory
 terraform init
 
-# 2. Preview the changes Terraform will make
+# 3. Preview the changes Terraform will make
 terraform plan
 
-# 3. Create the infrastructure
+# 4. Create the infrastructure
 terraform apply
 
-# 4. Tear everything down when you're done
+# 5. Tear everything down when you're done
 terraform destroy
 ```
 
@@ -51,12 +54,13 @@ inline, e.g. `terraform apply -var="environment=prod"`.
 
 | Resource | Purpose |
 | --- | --- |
-| `aws_vpc` | Isolated virtual network |
-| `aws_subnet` | Public subnet the VM lives in |
-| `aws_internet_gateway` + `aws_route_table` | Outbound internet access |
-| `aws_security_group` | Allow ports 22 and 3000, deny everything else |
-| `aws_key_pair` | SSH key installed on the VM |
-| `aws_instance` | Ubuntu VM that runs the AgriPulse container |
+| `azurerm_resource_group` | Container that holds every resource below |
+| `azurerm_virtual_network` | Isolated virtual network |
+| `azurerm_subnet` | Subnet the VM lives in |
+| `azurerm_network_security_group` (+ subnet association) | Allow ports 22 and 3000, deny everything else |
+| `azurerm_public_ip` | Static public IP for the VM |
+| `azurerm_network_interface` | NIC connecting the VM to the subnet and public IP |
+| `azurerm_linux_virtual_machine` | Ubuntu VM that runs the AgriPulse container |
 
 ## Variables
 
@@ -64,12 +68,13 @@ inline, e.g. `terraform apply -var="environment=prod"`.
 | --- | --- | --- |
 | `project_name` | Prefix for resource names and tags | `agripulse` |
 | `environment` | Deployment environment | `dev` |
-| `region` | AWS region | _required_ |
-| `instance_type` | VM size | _required_ |
+| `location` | Azure region | _required_ |
+| `vm_size` | VM size | _required_ |
 | `app_port` | App container port | `3000` |
-| `vpc_cidr` | VPC CIDR block | `10.0.0.0/16` |
-| `subnet_cidr` | Subnet CIDR block | `10.0.1.0/24` |
-| `ssh_ingress_cidr` | CIDR allowed to SSH | `0.0.0.0/0` |
+| `vnet_cidr` | Virtual network CIDR | `10.0.0.0/16` |
+| `subnet_cidr` | Subnet CIDR | `10.0.1.0/24` |
+| `ssh_ingress_cidr` | Source allowed to SSH (CIDR or `*`) | `*` |
+| `admin_username` | VM admin user | `ubuntu` |
 | `ssh_public_key_path` | Path to the SSH public key | _required_ |
 
 ## Outputs
@@ -77,10 +82,11 @@ inline, e.g. `terraform apply -var="environment=prod"`.
 | Output | Description |
 | --- | --- |
 | `vm_public_ip` | Public IP of the VM — put this in Ansible's `inventory.ini` |
-| `instance_id` | VM instance ID |
-| `vpc_id` | VPC ID |
+| `vm_id` | VM resource ID |
+| `resource_group_name` | Resource group name |
+| `vnet_id` | Virtual network ID |
 | `subnet_id` | Subnet ID |
-| `security_group_id` | Security group ID |
+| `network_security_group_id` | Network security group ID |
 
 Grab the VM IP for Ansible with:
 
@@ -90,22 +96,20 @@ terraform output -raw vm_public_ip
 
 ## Remote state
 
-State is local by default. To store it remotely (shared, locked), create an S3
-bucket and a DynamoDB lock table once, then uncomment the `backend "s3"` block in
-`main.tf` and re-run `terraform init`:
+State is local by default. To store it remotely (shared, locked), create a
+resource group, storage account and container once, then uncomment the
+`backend "azurerm"` block in `main.tf` and re-run `terraform init`:
 
 ```bash
-aws s3 mb s3://agripulse-tfstate --region eu-west-1
-aws dynamodb create-table \
-  --table-name agripulse-tf-locks \
-  --attribute-definitions AttributeName=LockID,AttributeType=S \
-  --key-schema AttributeName=LockID,KeyType=HASH \
-  --billing-mode PAY_PER_REQUEST
+az group create --name agripulse-tfstate-rg --location southafricanorth
+az storage account create --name agripulsetfstate \
+  --resource-group agripulse-tfstate-rg --sku Standard_LRS
+az storage container create --name tfstate --account-name agripulsetfstate
 ```
 
 ## Notes
 
 - `terraform.tfvars` is committed on purpose — it holds no secrets. State files
   and the SSH private key are gitignored and never leave your machine.
-- The AMI is looked up dynamically (latest Ubuntu 22.04), so the config is not
-  tied to a single region.
+- The VM boots the latest Ubuntu 22.04 LTS image, selected via variables so the
+  config is not pinned to a single image build.
