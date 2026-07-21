@@ -1,9 +1,9 @@
-output "vpc_id" {
-  description = "ID of the created VPC."
-  value       = aws_vpc.this.id
+output "vnet_id" {
+  description = "ID of the created virtual network."
+  value       = azurerm_virtual_network.this.id
 }
 
 output "subnet_id" {
-  description = "ID of the public subnet."
-  value       = aws_subnet.public.id
+  description = "ID of the subnet."
+  value       = azurerm_subnet.this.id
 }

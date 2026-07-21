@@ -1,21 +1,26 @@
-output "vpc_id" {
-  description = "ID of the VPC."
-  value       = module.network.vpc_id
+output "resource_group_name" {
+  description = "Name of the resource group."
+  value       = azurerm_resource_group.this.name
+}
+
+output "vnet_id" {
+  description = "ID of the virtual network."
+  value       = module.network.vnet_id
 }
 
 output "subnet_id" {
-  description = "ID of the public subnet."
+  description = "ID of the subnet."
   value       = module.network.subnet_id
 }
 
-output "security_group_id" {
-  description = "ID of the application security group."
-  value       = module.security.security_group_id
+output "network_security_group_id" {
+  description = "ID of the network security group."
+  value       = module.security.network_security_group_id
 }
 
-output "instance_id" {
+output "vm_id" {
   description = "ID of the application VM."
-  value       = module.compute.instance_id
+  value       = module.compute.vm_id
 }
 
 output "vm_public_ip" {
