@@ -77,7 +77,9 @@ jobs:
     # ── Security Scanning (added by OJ) ──────────────────────────────────────
 
     - name: Run dependency scan
-      run: npm audit --audit-level=high --prefix Backend
+      run: |
+        npm audit --audit-level=high
+        npm audit --audit-level=high --prefix Backend
 
     - name: Install Trivy
       run: |
