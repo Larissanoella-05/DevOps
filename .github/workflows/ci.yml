@@ -13,8 +13,6 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
 
-    # Needed to push images to GitHub Container Registry using the
-    # auto-provided GITHUB_TOKEN — by default it's read-only.
     permissions:
       contents: read
       packages: write
@@ -32,7 +30,6 @@ jobs:
           package-lock.json
           Backend/package-lock.json
 
-    # 3. Install dependencies
     - name: Install dependencies
       run: |
         npm ci
@@ -44,8 +41,6 @@ jobs:
     - name: Run tests
       run: npm test
 
-    # GHCR requires a lowercase image name; github.repository/github.actor
-    # can contain uppercase letters, so compute a safe lowercase version.
     - name: Compute lowercase image name
       run: echo "IMAGE_NAME=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
 
@@ -67,3 +62,24 @@ jobs:
         tags: ghcr.io/${{ env.IMAGE_NAME }}:${{ github.sha }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
+
+    # ── Security Scanning (added by OJ) ──────────────────────────────────────
+
+    - name: Run dependency scan
+      run: npm audit --audit-level=high --prefix Backend
+
+    - name: Install Trivy
+      run: |
+        curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+
+    - name: Run container image scan
+      run: |
+        trivy image \
+          --exit-code 1 \
+          --severity CRITICAL \
+          ghcr.io/${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+    - name: Run Terraform IaC scan
+      uses: aquasecurity/tfsec-action@v1.0.0
+      with:
+        working_directory: terraform
