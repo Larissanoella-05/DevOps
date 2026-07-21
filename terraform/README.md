@@ -101,7 +101,7 @@ resource group, storage account and container once, then uncomment the
 `backend "azurerm"` block in `main.tf` and re-run `terraform init`:
 
 ```bash
-az group create --name agripulse-tfstate-rg --location southafricanorth
+az group create --name agripulse-tfstate-rg --location centralindia
 az storage account create --name agripulsetfstate \
   --resource-group agripulse-tfstate-rg --sku Standard_LRS
 az storage container create --name tfstate --account-name agripulsetfstate
