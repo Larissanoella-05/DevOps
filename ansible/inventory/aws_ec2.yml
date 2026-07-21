@@ -1,0 +1,21 @@
+plugin: amazon.aws.aws_ec2
+
+regions:
+  - eu-west-1
+
+filters:
+  tag:Project: agripulse
+  instance-state-name: running
+
+groups:
+  agripulse_servers: "'Project' in (tags | default({})) and tags.Project == 'agripulse'"
+
+keyed_groups:
+  - key: tags.Environment
+    prefix: env
+
+compose:
+  ansible_host: public_ip_address
+  ansible_user: "'ubuntu'"
+
+strict: False
