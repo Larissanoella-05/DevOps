@@ -3,8 +3,18 @@ variable "name" {
   type        = string
 }
 
-variable "vpc_id" {
-  description = "VPC the security group is created in."
+variable "location" {
+  description = "Azure region."
+  type        = string
+}
+
+variable "resource_group_name" {
+  description = "Resource group to create the NSG in."
+  type        = string
+}
+
+variable "subnet_id" {
+  description = "Subnet the NSG is associated with."
   type        = string
 }
 
@@ -13,7 +23,19 @@ variable "app_port" {
   type        = number
 }
 
-variable "ssh_ingress_cidr" {
-  description = "CIDR range allowed to reach SSH. Restrict this in production."
+variable "ssh_ingress_cidrs" {
+  description = "Source address prefixes allowed to reach SSH."
+  type        = list(string)
+}
+
+variable "app_ingress_cidr" {
+  description = "Source address prefix allowed to reach the app port (a CIDR, or \"*\" for any)."
   type        = string
+  default     = "*"
+}
+
+variable "tags" {
+  description = "Tags applied to security resources."
+  type        = map(string)
+  default     = {}
 }
