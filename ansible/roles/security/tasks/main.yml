@@ -1,0 +1,59 @@
+---
+- name: Install UFW
+  ansible.builtin.apt:
+    name: ufw
+    state: present
+
+- name: Set UFW default policy - deny incoming
+  community.general.ufw:
+    direction: incoming
+    policy: deny
+
+- name: Set UFW default policy - allow outgoing
+  community.general.ufw:
+    direction: outgoing
+    policy: allow
+
+- name: Allow required ports through UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop: "{{ firewall_allowed_ports }}"
+
+- name: Enable UFW
+  community.general.ufw:
+    state: enabled
+
+- name: Harden SSH access
+  block:
+    - name: Confirm ansible_user has an authorized SSH key before disabling password auth
+      ansible.builtin.command: grep -q . /home/{{ ansible_user }}/.ssh/authorized_keys
+      changed_when: false
+
+    - name: Disable root SSH login
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PermitRootLogin'
+        line: 'PermitRootLogin no'
+        backup: true
+        validate: '/usr/sbin/sshd -t -f %s'
+      notify: restart ssh
+
+    - name: Disable SSH password authentication (key-only)
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PasswordAuthentication'
+        line: 'PasswordAuthentication no'
+        backup: true
+        validate: '/usr/sbin/sshd -t -f %s'
+      notify: restart ssh
+  rescue:
+    - name: Report SSH hardening failure
+      ansible.builtin.fail:
+        msg: >-
+          SSH hardening failed on {{ inventory_hostname }} at task
+          '{{ ansible_failed_task.name }}'. sshd_config changes (if any) were
+          validated with 'sshd -t' before being applied, and backups were kept
+          alongside the file, so SSH access should still work. Confirm an
+          authorized_keys file exists for {{ ansible_user }} before retrying.
