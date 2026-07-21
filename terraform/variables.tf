@@ -38,8 +38,13 @@ variable "app_port" {
   default     = 3000
 }
 
-variable "ssh_ingress_cidr" {
-  description = "Source prefix allowed to reach SSH (port 22). A CIDR, or \"*\" for any. Restrict this in production."
+variable "ssh_ingress_cidrs" {
+  description = "Source prefixes allowed to reach SSH (port 22). Restrict to known admin IPs, e.g. [\"203.0.113.10/32\"]. Required, so SSH is never left open by default."
+  type        = list(string)
+}
+
+variable "app_ingress_cidr" {
+  description = "Source prefix allowed to reach the app port. A CIDR, or \"*\" for any."
   type        = string
   default     = "*"
 }
@@ -53,4 +58,10 @@ variable "admin_username" {
 variable "ssh_public_key_path" {
   description = "Path to the SSH public key uploaded to the VM for admin access."
   type        = string
+}
+
+variable "extra_ssh_public_keys" {
+  description = "Additional SSH public keys (raw key material) granted access to the VM, e.g. teammates running Ansible."
+  type        = list(string)
+  default     = []
 }

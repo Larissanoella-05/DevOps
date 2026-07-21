@@ -34,6 +34,12 @@ variable "ssh_public_key_path" {
   type        = string
 }
 
+variable "extra_ssh_public_keys" {
+  description = "Additional SSH public keys (raw key material) installed on the VM."
+  type        = list(string)
+  default     = []
+}
+
 variable "image_publisher" {
   description = "Publisher of the base image."
   type        = string

@@ -23,9 +23,15 @@ variable "app_port" {
   type        = number
 }
 
-variable "ssh_ingress_cidr" {
-  description = "Source address prefix allowed to reach SSH (a CIDR, or \"*\" for any)."
+variable "ssh_ingress_cidrs" {
+  description = "Source address prefixes allowed to reach SSH."
+  type        = list(string)
+}
+
+variable "app_ingress_cidr" {
+  description = "Source address prefix allowed to reach the app port (a CIDR, or \"*\" for any)."
   type        = string
+  default     = "*"
 }
 
 variable "tags" {

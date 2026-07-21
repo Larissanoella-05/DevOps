@@ -10,7 +10,9 @@ a compute VM to run the Docker container, and the security rules around it on Az
   with `az login`. Terraform reuses that session, so no cloud keys live in the repo.
 - An SSH key pair. The **public** key path goes in `terraform.tfvars`
   (`ssh_public_key_path`); the matching private key is what Ansible uses later.
-  Generate one with `ssh-keygen -t rsa -b 4096` if you don't have it.
+  Generate one with `ssh-keygen -t ed25519` if you don't have it — the default
+  `ssh_public_key_path` in `terraform.tfvars` expects an ed25519 key. Teammates who
+  need access add their public keys to `extra_ssh_public_keys` instead.
 
 ## Layout
 
@@ -73,9 +75,11 @@ inline, e.g. `terraform apply -var="environment=prod"`.
 | `app_port` | App container port | `3000` |
 | `vnet_cidr` | Virtual network CIDR | `10.0.0.0/16` |
 | `subnet_cidr` | Subnet CIDR | `10.0.1.0/24` |
-| `ssh_ingress_cidr` | Source allowed to SSH (CIDR or `*`) | `*` |
+| `ssh_ingress_cidrs` | Source prefixes allowed to SSH (list of CIDRs) | _required_ |
+| `app_ingress_cidr` | Source allowed to reach the app port | `*` |
 | `admin_username` | VM admin user | `ubuntu` |
 | `ssh_public_key_path` | Path to the SSH public key | _required_ |
+| `extra_ssh_public_keys` | Additional teammate public keys installed on the VM | `[]` |
 
 ## Outputs
 

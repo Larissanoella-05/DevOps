@@ -55,18 +55,20 @@ module "security" {
   resource_group_name = azurerm_resource_group.this.name
   subnet_id           = module.network.subnet_id
   app_port            = var.app_port
-  ssh_ingress_cidr    = var.ssh_ingress_cidr
+  ssh_ingress_cidrs   = var.ssh_ingress_cidrs
+  app_ingress_cidr    = var.app_ingress_cidr
   tags                = local.tags
 }
 
 module "compute" {
-  source              = "./modules/compute"
-  name                = local.name
-  location            = var.location
-  resource_group_name = azurerm_resource_group.this.name
-  subnet_id           = module.network.subnet_id
-  vm_size             = var.vm_size
-  admin_username      = var.admin_username
-  ssh_public_key_path = var.ssh_public_key_path
-  tags                = local.tags
+  source                = "./modules/compute"
+  name                  = local.name
+  location              = var.location
+  resource_group_name   = azurerm_resource_group.this.name
+  subnet_id             = module.network.subnet_id
+  vm_size               = var.vm_size
+  admin_username        = var.admin_username
+  ssh_public_key_path   = var.ssh_public_key_path
+  extra_ssh_public_keys = var.extra_ssh_public_keys
+  tags                  = local.tags
 }

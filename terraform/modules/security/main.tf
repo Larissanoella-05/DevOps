@@ -16,7 +16,7 @@ resource "azurerm_network_security_group" "app" {
     protocol                   = "Tcp"
     source_port_range          = "*"
     destination_port_range     = "22"
-    source_address_prefix      = var.ssh_ingress_cidr
+    source_address_prefixes    = var.ssh_ingress_cidrs
     destination_address_prefix = "*"
   }
 
@@ -29,7 +29,7 @@ resource "azurerm_network_security_group" "app" {
     protocol                   = "Tcp"
     source_port_range          = "*"
     destination_port_range     = tostring(var.app_port)
-    source_address_prefix      = "*"
+    source_address_prefix      = var.app_ingress_cidr
     destination_address_prefix = "*"
   }
 
