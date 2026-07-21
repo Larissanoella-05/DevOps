@@ -21,14 +21,17 @@ resource "azurerm_network_security_group" "app" {
   }
 
   security_rule {
-    name                       = "allow-app"
-    description                = "AgriPulse app"
-    priority                   = 1002
-    direction                  = "Inbound"
-    access                     = "Allow"
-    protocol                   = "Tcp"
-    source_port_range          = "*"
-    destination_port_range     = tostring(var.app_port)
+    name                   = "allow-app"
+    description            = "AgriPulse app"
+    priority               = 1002
+    direction              = "Inbound"
+    access                 = "Allow"
+    protocol               = "Tcp"
+    source_port_range      = "*"
+    destination_port_range = tostring(var.app_port)
+    # AgriPulse is a public web app; this port is meant to be internet-reachable.
+    # SSH (the sensitive port) is restricted to admin IPs above. See SECURITY.md.
+    # tfsec:ignore:azure-network-no-public-ingress
     source_address_prefix      = var.app_ingress_cidr
     destination_address_prefix = "*"
   }
