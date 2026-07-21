@@ -78,7 +78,7 @@ jobs:
           --exit-code 1 \
           --severity CRITICAL \
           --skip-dirs /usr/local/lib/node_modules/npm \
-        ghcr.io/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          ghcr.io/${{ env.IMAGE_NAME }}:${{ github.sha }}
 
     - name: Run Terraform IaC scan
       uses: aquasecurity/tfsec-action@v1.0.0
