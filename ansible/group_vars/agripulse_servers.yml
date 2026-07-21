@@ -1,0 +1,24 @@
+---
+app_name: agripulse
+app_container_name: agripulse
+app_port: 3000
+app_host_port: 3000
+
+app_deploy_method: pull
+app_registry_image: "emeranceu/agripulse:latest"
+app_image_tar_src: "../agripulse-image.tar"
+app_image: "agripulse:latest"
+
+app_data_dir: /opt/agripulse/data
+app_env_dir: /opt/agripulse
+app_restart_policy: unless-stopped
+
+app_env:
+  NODE_ENV: production
+  PORT: "{{ app_port }}"
+  DB_PATH: /app/data/agripulse.db
+
+ssh_port: 22
+firewall_allowed_ports:
+  - "{{ ssh_port }}"
+  - "{{ app_port }}"

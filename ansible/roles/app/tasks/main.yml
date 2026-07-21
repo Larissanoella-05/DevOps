@@ -1,0 +1,93 @@
+---
+- name: Create application directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ docker_service_user | default('ubuntu') }}"
+    group: docker
+    mode: "0755"
+  loop:
+    - "{{ app_env_dir }}"
+    - "{{ app_data_dir }}"
+
+- name: Write application environment file
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ app_env_dir }}/.env"
+    mode: "0640"
+  notify: recreate app container
+
+- name: Get application image onto the server
+  block:
+    - name: Pull application image from registry
+      community.docker.docker_image:
+        name: "{{ app_registry_image }}"
+        source: pull
+        state: present
+      when: app_deploy_method == 'pull'
+      register: app_image_pull
+
+    - name: Set running image to the pulled registry image
+      ansible.builtin.set_fact:
+        app_running_image: "{{ app_registry_image }}"
+      when: app_deploy_method == 'pull'
+
+    - name: Copy local image tarball to the server
+      ansible.builtin.copy:
+        src: "{{ app_image_tar_src }}"
+        dest: /tmp/agripulse-image.tar
+        mode: "0644"
+      when: app_deploy_method == 'copy'
+
+    - name: Load image tarball into Docker
+      community.docker.docker_image:
+        name: "{{ app_image }}"
+        source: load
+        load_path: /tmp/agripulse-image.tar
+        state: present
+      when: app_deploy_method == 'copy'
+
+    - name: Set running image to the locally loaded image
+      ansible.builtin.set_fact:
+        app_running_image: "{{ app_image }}"
+      when: app_deploy_method == 'copy'
+  rescue:
+    - name: Report image deployment failure
+      ansible.builtin.fail:
+        msg: >-
+          Could not get the AgriPulse image onto {{ inventory_hostname }} using
+          app_deploy_method={{ app_deploy_method }}. Confirm app_registry_image is
+          reachable (pull) or app_image_tar_src exists on the control node (copy).
+
+- name: Run the AgriPulse application container
+  block:
+    - name: Start (or update) the AgriPulse container
+      community.docker.docker_container:
+        name: "{{ app_container_name }}"
+        image: "{{ app_running_image }}"
+        state: started
+        restart_policy: "{{ app_restart_policy }}"
+        published_ports:
+          - "{{ app_host_port }}:{{ app_port }}"
+        env_file: "{{ app_env_dir }}/.env"
+        volumes:
+          - "{{ app_data_dir }}:/app/data"
+
+    - name: Wait for the application to accept connections
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: "{{ app_port }}"
+        timeout: 60
+  rescue:
+    - name: Collect container logs for diagnostics
+      community.docker.docker_container_info:
+        name: "{{ app_container_name }}"
+      register: app_container_info
+      ignore_errors: true
+
+    - name: Report application deployment failure
+      ansible.builtin.fail:
+        msg: >-
+          The AgriPulse container did not start cleanly on {{ inventory_hostname }}.
+          Container state: {{ app_container_info.container.State.Status | default('unknown') }}.
+          Run 'docker logs {{ app_container_name }}' on the host for details.
