@@ -1,0 +1,23 @@
+plugin: azure.azcollection.azure_rm
+
+# Matches the resource group Terraform creates: "${project_name}-${environment}-rg".
+# The wildcard covers dev/staging/prod without editing this file per environment.
+include_vm_resource_groups:
+  - agripulse-*-rg
+
+# Reuses your "az login" session — same auth Terraform relies on, no extra
+# credentials to configure.
+auth_source: auto
+
+conditional_groups:
+  agripulse_servers: "'Project' in (tags | default({})) and tags.Project == 'agripulse'"
+
+keyed_groups:
+  - key: tags.Environment
+    prefix: env
+
+hostvar_expressions:
+  ansible_host: public_ipv4_addresses[0] if public_ipv4_addresses else private_ipv4_addresses[0]
+  ansible_user: "'ubuntu'"
+
+plain_host_names: true

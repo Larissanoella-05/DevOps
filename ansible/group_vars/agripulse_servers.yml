@@ -5,7 +5,9 @@ app_port: 3000
 app_host_port: 3000
 
 app_deploy_method: pull
-app_registry_image: "emeranceu/agripulse:latest"
+# The image CI builds, scans (Trivy), and pushes to GHCR on every merge to main —
+# keeps the deployed image tied to what the pipeline actually built and checked.
+app_registry_image: "ghcr.io/larissanoella-05/devops:latest"
 app_image_tar_src: "../agripulse-image.tar"
 app_image: "agripulse:latest"
 

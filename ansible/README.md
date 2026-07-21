@@ -17,9 +17,13 @@ On your control machine (the one running `ansible-playbook`):
   server (Terraform does this via `ssh_public_key_path` /
   `terraform/variables.tf`) and the **private** key available locally at the
   path referenced in `inventory.ini` (default `~/.ssh/id_rsa`).
-- Only needed for the dynamic inventory (see below): `pip install boto3
-  botocore` and AWS credentials in your environment (`aws configure`, or
-  `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`).
+- Only needed for the dynamic inventory (see below): the Python packages the
+  `azure.azcollection` plugin depends on:
+  ```bash
+  pip install -r ~/.ansible/collections/ansible_collections/azure/azcollection/requirements-azure.txt
+  ```
+  and an active `az login` session (same one Terraform uses — see
+  `terraform/README.md`).
 
 ## Updating inventory.ini with the Terraform IP
 
@@ -61,15 +65,16 @@ second run only touches things that actually drifted.
 
 ### Using dynamic inventory instead of the static file
 
-`inventory/aws_ec2.yml` queries AWS directly for any running EC2 instance
-tagged `Project=agripulse` (the tag Terraform's `default_tags` applies), so
-there's no IP to copy by hand:
+`inventory/azure_rm.yml` queries Azure directly for any VM in a resource
+group matching `agripulse-*-rg` (Terraform names resource groups
+`${project_name}-${environment}-rg`) tagged `Project=agripulse` (the tag
+Terraform's `local.tags` applies), so there's no IP to copy by hand:
 
 ```bash
-ansible-playbook -i inventory/aws_ec2.yml playbook.yml
+ansible-playbook -i inventory/azure_rm.yml playbook.yml
 ```
 
-Sanity-check what it finds with `ansible-inventory -i inventory/aws_ec2.yml --graph`.
+Sanity-check what it finds with `ansible-inventory -i inventory/azure_rm.yml --graph`.
 
 ## What gets configured
 
@@ -87,8 +92,13 @@ Sanity-check what it finds with `ansible-inventory -i inventory/aws_ec2.yml --gr
 - Creates `/opt/agripulse` (env file) and `/opt/agripulse/data` (persisted
   SQLite data, bind-mounted into the container)
 - Gets the image onto the server — either `docker pull`s
-  `app_registry_image` or copies/loads a local tarball, depending on
-  `app_deploy_method` in `group_vars/agripulse_servers.yml`
+  `app_registry_image` (currently the GHCR image the CI pipeline builds and
+  Trivy-scans on every merge to `main`) or copies/loads a local tarball,
+  depending on `app_deploy_method` in `group_vars/agripulse_servers.yml`.
+  **GHCR packages built via `GITHUB_TOKEN` default to private** — either make
+  the package public (repo → Packages → package settings → Change
+  visibility) or add a `docker login ghcr.io` step ahead of the pull, or the
+  pull will fail with an authorization error.
 - Runs the container with port mapping `3000:3000`, the env vars
   `NODE_ENV`, `PORT`, `DB_PATH`, and `restart_policy: unless-stopped`
 - Waits for the app to accept TCP connections on port 3000 before
