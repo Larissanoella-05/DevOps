@@ -1,0 +1,10 @@
+---
+- name: Configure and deploy the AgriPulse application server
+  hosts: agripulse_servers
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: docker
+    - role: app
+    - role: security
