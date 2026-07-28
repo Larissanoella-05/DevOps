@@ -37,4 +37,10 @@ resource "azurerm_postgresql_flexible_server" "this" {
 
   # The DNS link must exist before the server attaches to the private zone.
   depends_on = [azurerm_private_dns_zone_virtual_network_link.postgres]
+
+  # Azure assigns an availability zone at creation and will not move it afterwards,
+  # so we let it own the zone rather than fighting a perpetual diff.
+  lifecycle {
+    ignore_changes = [zone]
+  }
 }

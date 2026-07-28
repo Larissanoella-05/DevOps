@@ -43,4 +43,10 @@ resource "azurerm_subnet" "database" {
       actions = ["Microsoft.Network/virtualNetworks/subnets/join/action"]
     }
   }
+
+  # PostgreSQL flexible server manages a Microsoft.Storage service endpoint on its
+  # delegated subnet; let Azure own it so plans stay clean.
+  lifecycle {
+    ignore_changes = [service_endpoints]
+  }
 }
