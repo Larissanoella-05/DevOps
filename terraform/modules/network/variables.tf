@@ -18,8 +18,18 @@ variable "vnet_cidr" {
   type        = string
 }
 
-variable "subnet_cidr" {
-  description = "CIDR block for the subnet."
+variable "public_subnet_cidr" {
+  description = "CIDR for the public subnet (bastion host)."
+  type        = string
+}
+
+variable "private_subnet_cidr" {
+  description = "CIDR for the private subnet (application VM)."
+  type        = string
+}
+
+variable "db_subnet_cidr" {
+  description = "CIDR for the delegated database subnet."
   type        = string
 }
 
