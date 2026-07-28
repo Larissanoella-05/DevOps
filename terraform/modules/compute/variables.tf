@@ -14,12 +14,12 @@ variable "resource_group_name" {
 }
 
 variable "subnet_id" {
-  description = "Subnet the VM's NIC is attached to."
+  description = "Private subnet the app VM's NIC is attached to."
   type        = string
 }
 
 variable "vm_size" {
-  description = "Azure VM size."
+  description = "Azure VM size for the application host."
   type        = string
 }
 
@@ -29,15 +29,9 @@ variable "admin_username" {
   default     = "ubuntu"
 }
 
-variable "ssh_public_key_path" {
-  description = "Path to the SSH public key installed on the VM."
-  type        = string
-}
-
-variable "extra_ssh_public_keys" {
-  description = "Additional SSH public keys (raw key material) installed on the VM."
+variable "ssh_public_keys" {
+  description = "SSH public keys installed on the VM (owner key plus any teammate keys)."
   type        = list(string)
-  default     = []
 }
 
 variable "image_publisher" {

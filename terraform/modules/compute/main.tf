@@ -1,16 +1,8 @@
-# Public IP, network interface, and the Ubuntu VM that runs the AgriPulse container.
-
-resource "azurerm_public_ip" "this" {
-  name                = "${var.name}-pip"
-  location            = var.location
-  resource_group_name = var.resource_group_name
-  allocation_method   = "Static"
-  sku                 = "Standard"
-  tags                = var.tags
-}
+# Application VM. It lives in the private subnet with no public IP — the bastion
+# is the only way in. Ansible reaches it by jumping through the bastion.
 
 resource "azurerm_network_interface" "this" {
-  name                = "${var.name}-nic"
+  name                = "${var.name}-app-nic"
   location            = var.location
   resource_group_name = var.resource_group_name
 
@@ -18,14 +10,13 @@ resource "azurerm_network_interface" "this" {
     name                          = "internal"
     subnet_id                     = var.subnet_id
     private_ip_address_allocation = "Dynamic"
-    public_ip_address_id          = azurerm_public_ip.this.id
   }
 
   tags = var.tags
 }
 
 resource "azurerm_linux_virtual_machine" "app" {
-  name                  = "${var.name}-vm"
+  name                  = "${var.name}-app-vm"
   location              = var.location
   resource_group_name   = var.resource_group_name
   size                  = var.vm_size
@@ -36,14 +27,8 @@ resource "azurerm_linux_virtual_machine" "app" {
   # security posture is visible to reviewers.
   disable_password_authentication = true
 
-  admin_ssh_key {
-    username   = var.admin_username
-    public_key = file(pathexpand(var.ssh_public_key_path))
-  }
-
-  # Extra keys let teammates (e.g. Ansible) reach the VM without sharing a private key.
   dynamic "admin_ssh_key" {
-    for_each = var.extra_ssh_public_keys
+    for_each = var.ssh_public_keys
     content {
       username   = var.admin_username
       public_key = admin_ssh_key.value
@@ -53,8 +38,7 @@ resource "azurerm_linux_virtual_machine" "app" {
   os_disk {
     caching              = "ReadWrite"
     storage_account_type = "Standard_LRS"
-    # Azure encrypts managed disks at rest by default using platform-managed keys,
-    # so there is no explicit "encrypted" flag here (unlike AWS EBS).
+    # Azure encrypts managed disks at rest by default using platform-managed keys.
   }
 
   source_image_reference {
