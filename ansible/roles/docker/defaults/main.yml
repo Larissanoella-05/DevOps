@@ -14,8 +14,5 @@ docker_apt_packages:
   - docker-buildx-plugin
   - docker-compose-plugin
 
-nodejs_major_version: "20"
-docker_service_user: ubuntu
-
 docker_log_max_size: "10m"
 docker_log_max_file: "3"
