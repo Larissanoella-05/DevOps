@@ -1,8 +1,31 @@
 # AgriPulse — Ansible configuration
 
-Configures a fresh Ubuntu 22.04 server (provisioned by Joshua's Terraform) into
-a running AgriPulse deployment: installs dependencies, deploys the
-containerized app, and hardens the server.
+Configures the two-tier AgriPulse deployment provisioned by the summative
+Terraform: a public **bastion** host and a private **app VM** with no public
+IP of its own. The playbook installs Docker, logs in to Azure Container
+Registry, deploys the app with Docker Compose, and hardens both hosts.
+
+## Architecture
+
+```
+        you / CD pipeline
+               │ SSH
+               ▼
+     ┌───────────────────┐   public subnet
+     │  bastion (public)  │   SSH hardened, jump host only
+     └─────────┬──────────┘
+               │ SSH (ProxyJump)
+               ▼
+     ┌───────────────────┐   private subnet
+     │  app VM (private)  │   Docker + Compose, runs the container
+     └────────────────────┘
+```
+
+Ansible never talks to the app VM directly — every connection is proxied
+through the bastion via `ProxyJump`. `group_vars/app.yml` computes that jump
+automatically from whichever host is in the `[bastion]` inventory group, so
+this works with either the static or the dynamic inventory without editing
+anything by hand.
 
 ## Prerequisites
 
@@ -13,40 +36,50 @@ On your control machine (the one running `ansible-playbook`):
   ```bash
   ansible-galaxy collection install -r requirements.yml
   ```
-- An SSH key pair, with the **public** key already installed on the target
-  server (Terraform does this via `ssh_public_key_path` /
-  `terraform/variables.tf`) and the **private** key available locally at the
-  path referenced in `inventory.ini` (default `~/.ssh/id_rsa`).
+- An SSH key pair, with the **public** key already installed on both VMs
+  (Terraform does this via `ssh_public_key_path` / `extra_ssh_public_keys`)
+  and the **private** key available locally at the path referenced in
+  `inventory.ini` (default `~/.ssh/id_rsa`).
+- ACR credentials exported as environment variables (never committed):
+  ```bash
+  export ACR_LOGIN_SERVER=$(terraform -chdir=../terraform output -raw acr_login_server)
+  export ACR_USERNAME=$(terraform -chdir=../terraform output -raw acr_admin_username)
+  export ACR_PASSWORD=$(terraform -chdir=../terraform output -raw acr_admin_password)
+  ```
 - Only needed for the dynamic inventory (see below): the Python packages the
   `azure.azcollection` plugin depends on:
   ```bash
   pip install -r ~/.ansible/collections/ansible_collections/azure/azcollection/requirements-azure.txt
   ```
-  and an active `az login` session (same one Terraform uses — see
-  `terraform/README.md`).
+  and an active `az login` session (same one Terraform uses).
 
-## Updating inventory.ini with the Terraform IP
-
-After Joshua applies the Terraform, get the server IP:
+## Updating inventory.ini with the Terraform IPs
 
 ```bash
 cd ../terraform
-terraform output vm_public_ip
+terraform output -raw bastion_public_ip
+terraform output -raw app_private_ip
 ```
 
-Open `inventory.ini` and replace `your-server-ip` with that value:
+Put those in `inventory.ini`:
 
 ```ini
-[agripulse_servers]
-203.0.113.42 ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa
+[bastion]
+<bastion_public_ip> ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa
 
-[agripulse_servers:vars]
+[app]
+<app_private_ip> ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa
+
+[app:vars]
 ansible_python_interpreter=/usr/bin/python3
 ```
 
+No `ProxyJump` line is needed here — `group_vars/app.yml` builds it from the
+`[bastion]` group at run time.
+
 ## Running the playbook
 
-From the `ansible/` directory:
+From the `ansible/` directory, with the `ACR_*` variables exported:
 
 ```bash
 ansible-playbook -i inventory.ini playbook.yml
@@ -60,15 +93,20 @@ ansible-playbook -i inventory.ini playbook.yml --check          # dry run
 ansible-playbook -i inventory.ini playbook.yml -vv              # verbose output
 ```
 
-It's safe to re-run the playbook any time — every task is idempotent, so a
-second run only touches things that actually drifted.
+It's safe to re-run any time. Every task is idempotent, and a second run
+with no new image pushed only touches things that actually drifted — the
+image pull is compared by digest, so the container is only recreated when
+the pulled image actually changed.
+
+The CD pipeline runs this same command as its final deploy step, after
+pushing a new image to ACR — that's what makes `docker compose up -d` pick
+up the new build.
 
 ### Using dynamic inventory instead of the static file
 
-`inventory/azure_rm.yml` queries Azure directly for any VM in a resource
-group matching `agripulse-*-rg` (Terraform names resource groups
-`${project_name}-${environment}-rg`) tagged `Project=agripulse` (the tag
-Terraform's `local.tags` applies), so there's no IP to copy by hand:
+`inventory/azure_rm.yml` queries Azure directly for the bastion and app VMs
+by name (`*-bastion` / `*-app-vm`, matching what Terraform names them), so
+there's no IP to copy by hand:
 
 ```bash
 ansible-playbook -i inventory/azure_rm.yml playbook.yml
@@ -78,57 +116,67 @@ Sanity-check what it finds with `ansible-inventory -i inventory/azure_rm.yml --g
 
 ## What gets configured
 
-**`roles/docker`** — Step 1, install dependencies:
+**Bastion play** (`roles/security` only):
+- UFW: default-deny incoming, allow SSH (22), enabled
+- Root SSH login and password auth disabled, `sshd_config` validated with
+  `sshd -t` before restart, backup kept
+
+**App play** (`roles/docker`, `roles/app`, `roles/security`):
+
+`roles/docker` — install dependencies:
 - Adds Docker's official apt repository and installs `docker-ce`,
   `docker-ce-cli`, `containerd.io`, and the buildx/compose plugins
-- Installs the Docker SDK for Python (needed by the app role's container
-  tasks) and adds `ubuntu` to the `docker` group
-- Installs Node.js (NodeSource repo) and required system packages
-  (`ca-certificates`, `curl`, `gnupg`, etc.)
+- Installs the Docker SDK for Python (needed by `docker_login`/`docker_image`)
+  and adds `ubuntu` to the `docker` group
 - Writes `/etc/docker/daemon.json` (log rotation) and restarts the Docker
   daemon only when that file actually changes (handler)
 
-**`roles/app`** — Step 2, deploy the app:
-- Creates `/opt/agripulse` (env file) and `/opt/agripulse/data` (persisted
-  SQLite data, bind-mounted into the container)
-- Gets the image onto the server — either `docker pull`s
-  `app_registry_image` (currently the GHCR image the CI pipeline builds and
-  Trivy-scans on every merge to `main`) or copies/loads a local tarball,
-  depending on `app_deploy_method` in `group_vars/agripulse_servers.yml`.
-  **GHCR packages built via `GITHUB_TOKEN` default to private** — either make
-  the package public (repo → Packages → package settings → Change
-  visibility) or add a `docker login ghcr.io` step ahead of the pull, or the
-  pull will fail with an authorization error.
-- Runs the container with port mapping `3000:3000`, the env vars
-  `NODE_ENV`, `PORT`, `DB_PATH`, and `restart_policy: unless-stopped`
-- Waits for the app to accept TCP connections on port 3000 before
-  finishing; restarts the container (handler) only when the env file
-  actually changes
+`roles/app` — deploy the app:
+- Creates `/opt/agripulse` (compose project) and `/opt/agripulse/data`
+  (persisted SQLite data, bind-mounted into the container)
+- Writes `docker-compose.yml` from a template (image, port, env vars,
+  restart policy, data volume)
+- Logs in to Azure Container Registry (`community.docker.docker_login`,
+  `no_log: true` so credentials never hit the console/log)
+- Pulls the image and compares it by digest; runs `docker compose up -d`,
+  forcing a recreate only when the pulled image actually changed — so a
+  plain re-run doesn't needlessly restart a container that's already
+  running the current image
+- Waits for the app to accept TCP connections on port 3000 before finishing
 
-**`roles/security`** — Step 3, harden the server:
-- UFW: default-deny incoming, default-allow outgoing, explicitly allow
-  22 (SSH) and 3000 (app), then enables the firewall
-- Disables root SSH login (`PermitRootLogin no`)
-- Disables SSH password authentication (`PasswordAuthentication no`,
-  key-only) — only after confirming `ansible_user` already has an
-  `authorized_keys` entry, so the play fails loudly instead of locking
-  you out
-- Validates `sshd_config` with `sshd -t` before restarting `ssh`
-  (handler), and keeps a backup of the file
+`roles/security` — harden the app VM:
+- UFW: default-deny incoming, allow SSH (22) and the app port (3000) only
+  from the bastion's subnet (`public_subnet_cidr`, matching the Terraform
+  NSG's `allow-*-from-bastion` rules) — not open to the internet
+- Root SSH login and password auth disabled the same way as the bastion
 
-Error handling: each role's risky steps (package/repo setup, image
-deployment + container start, SSH hardening) run inside `block`/`rescue` so
-a failure produces a clear, actionable message instead of a bare traceback.
+Error handling: every role's risky steps (package/repo setup, registry
+login, image pull + compose deploy, SSH hardening) run inside `block`/`rescue`
+so a failure produces a clear, actionable message — including pulling the
+container's own logs on a failed deploy — instead of a bare traceback.
 
 ## Verifying the app after the playbook finishes
 
+The app VM has no public IP, so reach it the same way Ansible does — through
+the bastion:
+
 ```bash
-ssh -i ~/.ssh/id_rsa ubuntu@<server-ip> 'docker ps --filter name=agripulse'
-curl http://<server-ip>:3000/api/prices
+ssh -J ubuntu@<bastion_public_ip> ubuntu@<app_private_ip> 'docker compose -f /opt/agripulse/docker-compose.yml ps'
+ssh -J ubuntu@<bastion_public_ip> ubuntu@<app_private_ip> 'curl -s http://localhost:3000/api/prices'
 ```
 
-- `docker ps` should show the `agripulse` container with status `Up` and
-  port `3000->3000`.
+- `docker compose ps` should show the `agripulse` service `Up` and healthy.
 - The `curl` should return a JSON response (not a connection error).
-- `ssh ubuntu@<server-ip>` should still work; `ssh root@<server-ip>` and
-  password-based logins should both be refused.
+- `ssh ubuntu@<app_private_ip>` (via the bastion) should still work;
+  password logins and root logins should both be refused on either host.
+
+## Notes
+
+- The managed PostgreSQL database Terraform provisions isn't wired into the
+  app yet — it still persists to SQLite. Tracked as future work, same as on
+  the Terraform side.
+- The bastion's NSG also opens the app port (3000) to the internet, intended
+  to front public web traffic and proxy it to the private app VM. That
+  reverse proxy isn't configured by this playbook yet — today the app is
+  only reachable from inside the VNet (or via SSH port-forwarding through
+  the bastion), not directly over HTTP from the internet.
