@@ -3,75 +3,49 @@
   ansible.builtin.file:
     path: "{{ item }}"
     state: directory
-    owner: "{{ docker_service_user | default('ubuntu') }}"
+    owner: "{{ docker_service_user }}"
     group: docker
     mode: "0755"
   loop:
-    - "{{ app_env_dir }}"
+    - "{{ app_compose_dir }}"
     - "{{ app_data_dir }}"
 
-- name: Write application environment file
+- name: Write the Docker Compose file
   ansible.builtin.template:
-    src: env.j2
-    dest: "{{ app_env_dir }}/.env"
+    src: docker-compose.yml.j2
+    dest: "{{ app_compose_dir }}/docker-compose.yml"
     mode: "0640"
-  notify: recreate app container
+  notify: redeploy app container
 
-- name: Get application image onto the server
+- name: Log in to the private container registry
   block:
-    - name: Pull application image from registry
-      community.docker.docker_image:
-        name: "{{ app_registry_image }}"
-        source: pull
-        state: present
-      when: app_deploy_method == 'pull'
-      register: app_image_pull
-
-    - name: Set running image to the pulled registry image
-      ansible.builtin.set_fact:
-        app_running_image: "{{ app_registry_image }}"
-      when: app_deploy_method == 'pull'
-
-    - name: Copy local image tarball to the server
-      ansible.builtin.copy:
-        src: "{{ app_image_tar_src }}"
-        dest: /tmp/agripulse-image.tar
-        mode: "0644"
-      when: app_deploy_method == 'copy'
-
-    - name: Load image tarball into Docker
-      community.docker.docker_image:
-        name: "{{ app_image }}"
-        source: load
-        load_path: /tmp/agripulse-image.tar
-        state: present
-      when: app_deploy_method == 'copy'
-
-    - name: Set running image to the locally loaded image
-      ansible.builtin.set_fact:
-        app_running_image: "{{ app_image }}"
-      when: app_deploy_method == 'copy'
+    - name: Authenticate to {{ registry_login_server }}
+      community.docker.docker_login:
+        registry_url: "{{ registry_login_server }}"
+        username: "{{ registry_username }}"
+        password: "{{ registry_password }}"
+      no_log: true
   rescue:
-    - name: Report image deployment failure
+    - name: Report registry login failure
       ansible.builtin.fail:
         msg: >-
-          Could not get the AgriPulse image onto {{ inventory_hostname }} using
-          app_deploy_method={{ app_deploy_method }}. Confirm app_registry_image is
-          reachable (pull) or app_image_tar_src exists on the control node (copy).
+          Could not log in to {{ registry_login_server }} on {{ inventory_hostname }}.
+          Confirm ACR_LOGIN_SERVER, ACR_USERNAME and ACR_PASSWORD are exported in the
+          environment running ansible-playbook, and that the credentials are still valid.
 
-- name: Run the AgriPulse application container
+- name: Pull and start the application via Docker Compose
   block:
-    - name: Start (or update) the AgriPulse container
-      community.docker.docker_container:
-        name: "{{ app_container_name }}"
-        image: "{{ app_running_image }}"
-        state: started
-        restart_policy: "{{ app_restart_policy }}"
-        published_ports:
-          - "{{ app_host_port }}:{{ app_port }}"
-        env_file: "{{ app_env_dir }}/.env"
-        volumes:
-          - "{{ app_data_dir }}:/app/data"
+    - name: Pull the latest application image
+      community.docker.docker_image:
+        name: "{{ app_full_image }}"
+        source: pull
+      register: app_image_pull
+
+    - name: Start (or update) the application with docker compose up -d
+      community.docker.docker_compose_v2:
+        project_src: "{{ app_compose_dir }}"
+        state: present
+        recreate: "{{ 'always' if app_image_pull.changed else 'auto' }}"
 
     - name: Wait for the application to accept connections
       ansible.builtin.wait_for:
@@ -79,15 +53,15 @@
         port: "{{ app_port }}"
         timeout: 60
   rescue:
-    - name: Collect container logs for diagnostics
-      community.docker.docker_container_info:
-        name: "{{ app_container_name }}"
-      register: app_container_info
+    - name: Collect compose logs for diagnostics
+      ansible.builtin.command: docker compose -f {{ app_compose_dir }}/docker-compose.yml logs --tail=50
+      register: app_compose_logs
+      changed_when: false
       ignore_errors: true
 
     - name: Report application deployment failure
       ansible.builtin.fail:
         msg: >-
           The AgriPulse container did not start cleanly on {{ inventory_hostname }}.
-          Container state: {{ app_container_info.container.State.Status | default('unknown') }}.
-          Run 'docker logs {{ app_container_name }}' on the host for details.
+          Recent logs:
+          {{ app_compose_logs.stdout | default('unavailable') }}

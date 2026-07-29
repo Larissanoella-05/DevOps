@@ -1,0 +1,13 @@
+services:
+  {{ app_container_name }}:
+    image: "{{ app_full_image }}"
+    container_name: "{{ app_container_name }}"
+    restart: "{{ app_restart_policy }}"
+    ports:
+      - "{{ app_host_port }}:{{ app_port }}"
+    environment:
+{% for key, value in app_env.items() %}
+      {{ key }}: "{{ value }}"
+{% endfor %}
+    volumes:
+      - "{{ app_data_dir }}:/app/data"
