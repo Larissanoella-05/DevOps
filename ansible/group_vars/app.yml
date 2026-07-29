@@ -1,0 +1,28 @@
+---
+ansible_ssh_common_args: "-o ProxyJump=ubuntu@{{ hostvars[groups['bastion'][0]].ansible_host }}"
+
+app_container_name: agripulse
+app_port: 3000
+app_host_port: 3000
+
+registry_login_server: "{{ lookup('env', 'ACR_LOGIN_SERVER') }}"
+registry_username: "{{ lookup('env', 'ACR_USERNAME') }}"
+registry_password: "{{ lookup('env', 'ACR_PASSWORD') }}"
+registry_image_repo: agripulse
+registry_image_tag: latest
+app_full_image: "{{ registry_login_server }}/{{ registry_image_repo }}:{{ registry_image_tag }}"
+
+app_compose_dir: /opt/agripulse
+app_data_dir: /opt/agripulse/data
+app_restart_policy: unless-stopped
+
+app_env:
+  NODE_ENV: production
+  PORT: "{{ app_port }}"
+  DB_PATH: /app/data/agripulse.db
+
+firewall_rules:
+  - port: "{{ ssh_port }}"
+    src: "{{ public_subnet_cidr }}"
+  - port: "{{ app_port }}"
+    src: "{{ public_subnet_cidr }}"

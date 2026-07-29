@@ -1,0 +1,4 @@
+---
+ssh_port: 22
+public_subnet_cidr: 10.0.1.0/24
+docker_service_user: ubuntu
