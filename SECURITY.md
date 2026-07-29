@@ -15,6 +15,9 @@ Runs against both the root `package.json` and `Backend/package.json`
 | `body-parser` below 1.20.6 (DoS via a malformed request) | Low | `Backend/package-lock.json` | Fixed — bumped to 1.20.6 via `npm audit fix` (commit `0cfe74b`) |
 | `brace-expansion` 3.0.0–5.0.6 ReDoS | High | `Backend/package-lock.json` | Fixed — bumped to 5.0.7 via `npm audit fix` (commit `0cfe74b`) |
 | `brace-expansion` below 1.1.16 ([GHSA-3jxr-9vmj-r5cp](https://github.com/advisories/GHSA-3jxr-9vmj-r5cp)) ReDoS, pulled in transitively via `eslint` → `minimatch` | High | root `package-lock.json` | Fixed via `npm audit fix` |
+| `fast-uri` 3.0.0–3.1.3 host confusion via a literal backslash authority delimiter ([GHSA-v2hh-gcrm-f6hx](https://github.com/advisories/GHSA-v2hh-gcrm-f6hx)) | High | root `package-lock.json` | Fixed via `npm audit fix` |
+| `brace-expansion` unbounded expansion DoS ([GHSA-mh99-v99m-4gvg](https://github.com/advisories/GHSA-mh99-v99m-4gvg)), pulled in transitively via `eslint` → `@eslint/config-array` → `minimatch` | High | root `package-lock.json` | Fixed — required bumping `eslint` from 9.x to 10.x (`npm audit fix --force`); it's a lint-only devDependency, so the major bump doesn't touch the runtime app. Re-ran `npm run lint` after to confirm the existing flat config still works. |
+| `brace-expansion` unbounded expansion DoS, pulled in transitively via `nodemon` | High | `Backend/package-lock.json` | Fixed via `npm audit fix` |
 
 The root-level finding had been slipping past CI because the dependency scan
 step only ever ran `--prefix Backend` — the root lockfile was never audited.
