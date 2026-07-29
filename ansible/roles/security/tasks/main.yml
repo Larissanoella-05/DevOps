@@ -17,9 +17,10 @@
 - name: Allow required ports through UFW
   community.general.ufw:
     rule: allow
-    port: "{{ item }}"
+    port: "{{ item.port }}"
     proto: tcp
-  loop: "{{ firewall_allowed_ports }}"
+    src: "{{ item.src | default(omit) }}"
+  loop: "{{ firewall_rules }}"
 
 - name: Enable UFW
   community.general.ufw:
