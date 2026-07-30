@@ -2,7 +2,6 @@
 ansible_ssh_common_args: "-o ProxyJump=ubuntu@{{ hostvars[groups['bastion'][0]].ansible_host }}"
 
 app_container_name: agripulse
-app_port: 3000
 app_host_port: 3000
 
 registry_login_server: "{{ lookup('env', 'ACR_LOGIN_SERVER') }}"
