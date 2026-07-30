@@ -1,18 +1,50 @@
 # AgriPulse — Terraform Infrastructure
 
-Infrastructure as Code for the AgriPulse app. Terraform provisions the network,
-a compute VM to run the Docker container, and the security rules around it on Azure.
+Infrastructure as Code for the AgriPulse app on Azure. Terraform provisions a
+three-tier network, a public **bastion** host, a **private** application VM, a
+managed **PostgreSQL** database, and a private **container registry** the CD
+pipeline pushes images to.
+
+## Architecture
+
+```
+                 internet
+                    │
+                    ▼
+        ┌───────────────────────┐   public subnet
+        │  Bastion (public IP)  │   SSH from admin IPs, fronts web traffic
+        └───────────┬───────────┘
+                    │ SSH / proxy (in-VNet only)
+                    ▼
+        ┌───────────────────────┐   private subnet
+        │  App VM (no public IP)│   runs the Docker container
+        └───────────┬───────────┘
+                    │ private DNS
+                    ▼
+        ┌───────────────────────┐   delegated subnet
+        │  PostgreSQL (private) │   no public endpoint
+        └───────────────────────┘
+
+  Azure Container Registry ──▶ image source for the app VM / CD pipeline
+```
+
+The app VM has **no public IP**. Ansible (and admins) reach it only by hopping
+through the bastion. The database has **no public endpoint** — it is reachable
+only from inside the VNet.
 
 ## Prerequisites
 
 - [Terraform](https://developer.hashicorp.com/terraform/install) >= 1.5
 - [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) — sign in
   with `az login`. Terraform reuses that session, so no cloud keys live in the repo.
-- An SSH key pair. The **public** key path goes in `terraform.tfvars`
-  (`ssh_public_key_path`); the matching private key is what Ansible uses later.
-  Generate one with `ssh-keygen -t ed25519` if you don't have it — the default
-  `ssh_public_key_path` in `terraform.tfvars` expects an ed25519 key. Teammates who
-  need access add their public keys to `extra_ssh_public_keys` instead.
+- An SSH key pair. Generate one with `ssh-keygen -t ed25519` if you don't have it —
+  the default `ssh_public_key_path` expects an ed25519 key. Teammates who need
+  access add their public keys to `extra_ssh_public_keys`.
+- A database password exported as an environment variable (never committed):
+  ```bash
+  export TF_VAR_db_admin_password='<a-strong-password>'      # bash
+  $env:TF_VAR_db_admin_password = '<a-strong-password>'      # PowerShell
+  ```
 
 ## Layout
 
@@ -20,12 +52,15 @@ a compute VM to run the Docker container, and the security rules around it on Az
 terraform/
 ├── main.tf            # provider, backend, resource group, module composition
 ├── variables.tf       # input variables (no hardcoded values)
-├── outputs.tf         # exposed IPs and resource IDs
+├── outputs.tf         # exposed IPs, endpoints and resource IDs
 ├── terraform.tfvars   # actual values for this deployment
 └── modules/
-    ├── network/       # virtual network + subnet
-    ├── security/      # network security group: SSH (22) + app port, deny rest
-    └── compute/       # public IP + network interface + Ubuntu VM
+    ├── network/       # VNet + public, private and delegated DB subnets
+    ├── security/      # NSGs: bastion (public) and app (private) tiers
+    ├── bastion/       # public jump host
+    ├── compute/       # private application VM
+    ├── database/      # managed PostgreSQL (private) + private DNS
+    └── registry/      # Azure Container Registry
 ```
 
 ## Usage
@@ -33,76 +68,63 @@ terraform/
 ```bash
 cd terraform
 
-# 1. Sign in to Azure (once per session)
-az login
+az login                                          # once per session
+export TF_VAR_db_admin_password='<a-strong-password>'
 
-# 2. Download providers and initialise the working directory
-terraform init
-
-# 3. Preview the changes Terraform will make
-terraform plan
-
-# 4. Create the infrastructure
-terraform apply
-
-# 5. Tear everything down when you're done
-terraform destroy
+terraform init                                    # download providers + modules
+terraform plan                                    # preview
+terraform apply                                   # create the infrastructure
+terraform destroy                                 # tear it all down when finished
 ```
 
-Values are read from `terraform.tfvars` automatically. Override any of them
-inline, e.g. `terraform apply -var="environment=prod"`.
+Values are read from `terraform.tfvars` automatically.
 
 ## Resources created
 
 | Resource | Purpose |
 | --- | --- |
-| `azurerm_resource_group` | Container that holds every resource below |
-| `azurerm_virtual_network` | Isolated virtual network |
-| `azurerm_subnet` | Subnet the VM lives in |
-| `azurerm_network_security_group` (+ subnet association) | Allow ports 22 and 3000, deny everything else |
-| `azurerm_public_ip` | Static public IP for the VM |
-| `azurerm_network_interface` | NIC connecting the VM to the subnet and public IP |
-| `azurerm_linux_virtual_machine` | Ubuntu VM that runs the AgriPulse container |
+| `azurerm_resource_group` | Holds every resource below |
+| `azurerm_virtual_network` + 3 `azurerm_subnet` | Public, private and delegated DB tiers |
+| `azurerm_network_security_group` ×2 (+ associations) | Bastion and app-tier firewalls |
+| `azurerm_public_ip` + `azurerm_network_interface` + `azurerm_linux_virtual_machine` (bastion) | Public jump host |
+| `azurerm_network_interface` + `azurerm_linux_virtual_machine` (app) | Private application VM |
+| `azurerm_postgresql_flexible_server` (+ private DNS zone & link) | Managed database, VNet-private |
+| `azurerm_container_registry` | Private image registry |
 
-## Variables
+## Key variables
 
 | Variable | Description | Default |
 | --- | --- | --- |
-| `project_name` | Prefix for resource names and tags | `agripulse` |
-| `environment` | Deployment environment | `dev` |
 | `location` | Azure region | _required_ |
-| `vm_size` | VM size | _required_ |
-| `app_port` | App container port | `3000` |
-| `vnet_cidr` | Virtual network CIDR | `10.0.0.0/16` |
-| `subnet_cidr` | Subnet CIDR | `10.0.1.0/24` |
-| `ssh_ingress_cidrs` | Source prefixes allowed to SSH (list of CIDRs) | _required_ |
+| `vm_size` / `bastion_vm_size` | App / bastion VM size | _required_ / `Standard_B2ts_v2` |
+| `ssh_ingress_cidrs` | Admin IPs allowed to SSH the bastion (list) | _required_ |
 | `app_ingress_cidr` | Source allowed to reach the app port | `*` |
-| `admin_username` | VM admin user | `ubuntu` |
-| `ssh_public_key_path` | Path to the SSH public key | _required_ |
-| `extra_ssh_public_keys` | Additional teammate public keys installed on the VM | `[]` |
+| `db_admin_username` | PostgreSQL admin login | `psqladmin` |
+| `db_admin_password` | PostgreSQL admin password (via `TF_VAR_`) | _required_ |
+| `acr_name` | Registry base name (random suffix appended) | _required_ |
+
+Full list with defaults is in `variables.tf`.
 
 ## Outputs
 
-| Output | Description |
+| Output | Used by |
 | --- | --- |
-| `vm_public_ip` | Public IP of the VM — put this in Ansible's `inventory.ini` |
-| `vm_id` | VM resource ID |
-| `resource_group_name` | Resource group name |
-| `vnet_id` | Virtual network ID |
-| `subnet_id` | Subnet ID |
-| `network_security_group_id` | Network security group ID |
-
-Grab the VM IP for Ansible with:
+| `bastion_public_ip` | Ansible inventory (public host) + public app URL |
+| `app_private_ip` | Ansible inventory (private target host) |
+| `acr_login_server` | CD pipeline — where images are pushed/pulled |
+| `acr_admin_username` / `acr_admin_password` | CD pipeline `docker login` (password is sensitive) |
+| `database_fqdn` | App DB connection string |
 
 ```bash
-terraform output -raw vm_public_ip
+terraform output -raw bastion_public_ip
+terraform output -raw app_private_ip
 ```
 
 ## Remote state
 
-State is local by default. To store it remotely (shared, locked), create a
-resource group, storage account and container once, then uncomment the
-`backend "azurerm"` block in `main.tf` and re-run `terraform init`:
+State is local by default. To store it remotely, create a storage account and
+container once, then uncomment the `backend "azurerm"` block in `main.tf` and
+re-run `terraform init`:
 
 ```bash
 az group create --name agripulse-tfstate-rg --location centralindia
@@ -113,7 +135,11 @@ az storage container create --name tfstate --account-name agripulsetfstate
 
 ## Notes
 
-- `terraform.tfvars` is committed on purpose — it holds no secrets. State files
-  and the SSH private key are gitignored and never leave your machine.
-- The VM boots the latest Ubuntu 22.04 LTS image, selected via variables so the
-  config is not pinned to a single image build.
+- `terraform.tfvars` is committed on purpose — it holds no secrets. The DB
+  password comes from `TF_VAR_db_admin_password`; state files and the SSH private
+  key are gitignored and never leave your machine.
+- The registry and database names get a short random suffix so they stay globally
+  unique across re-deploys.
+- The managed PostgreSQL server is provisioned as required infrastructure. The app
+  currently persists to SQLite, so wiring it to PostgreSQL is documented as future
+  work rather than an active dependency.

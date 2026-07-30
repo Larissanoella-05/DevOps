@@ -1,5 +1,5 @@
 variable "name" {
-  description = "Name prefix for compute resources."
+  description = "Name prefix for bastion resources."
   type        = string
 }
 
@@ -9,28 +9,28 @@ variable "location" {
 }
 
 variable "resource_group_name" {
-  description = "Resource group to create the VM in."
+  description = "Resource group to create the bastion in."
   type        = string
 }
 
 variable "subnet_id" {
-  description = "Private subnet the app VM's NIC is attached to."
+  description = "Public subnet the bastion's NIC is attached to."
   type        = string
 }
 
 variable "vm_size" {
-  description = "Azure VM size for the application host."
+  description = "Azure VM size for the bastion (small is fine; it only forwards traffic)."
   type        = string
 }
 
 variable "admin_username" {
-  description = "Admin username for the VM."
+  description = "Admin username for the bastion."
   type        = string
   default     = "ubuntu"
 }
 
 variable "ssh_public_keys" {
-  description = "SSH public keys installed on the VM (owner key plus any teammate keys)."
+  description = "SSH public keys installed on the bastion (owner key plus any teammate keys)."
   type        = list(string)
 }
 
@@ -53,7 +53,7 @@ variable "image_sku" {
 }
 
 variable "tags" {
-  description = "Tags applied to compute resources."
+  description = "Tags applied to bastion resources."
   type        = map(string)
   default     = {}
 }
