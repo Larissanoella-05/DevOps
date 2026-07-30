@@ -67,24 +67,3 @@
           Docker installation failed on {{ inventory_hostname }} at task
           '{{ ansible_failed_task.name }}': {{ ansible_failed_result.msg | default('see task output above') }}.
           Check apt connectivity and that the host is Ubuntu 22.04 before re-running.
-
-- name: Check whether Node.js is already installed
-  ansible.builtin.command: node --version
-  register: node_version_check
-  changed_when: false
-  failed_when: false
-
-- name: Add NodeSource apt repository for Node.js {{ nodejs_major_version }}.x
-  ansible.builtin.shell: |
-    set -o pipefail
-    curl -fsSL https://deb.nodesource.com/setup_{{ nodejs_major_version }}.x | bash -
-  args:
-    executable: /bin/bash
-    creates: /etc/apt/sources.list.d/nodesource.list
-  when: "'v' + nodejs_major_version not in node_version_check.stdout"
-
-- name: Install Node.js
-  ansible.builtin.apt:
-    name: nodejs
-    state: present
-    update_cache: true

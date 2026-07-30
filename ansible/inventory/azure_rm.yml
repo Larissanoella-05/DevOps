@@ -10,7 +10,8 @@ include_vm_resource_groups:
 auth_source: auto
 
 conditional_groups:
-  agripulse_servers: "'Project' in (tags | default({})) and tags.Project == 'agripulse'"
+  bastion: "name.endswith('-bastion')"
+  app: "name.endswith('-app-vm')"
 
 keyed_groups:
   - key: tags.Environment
