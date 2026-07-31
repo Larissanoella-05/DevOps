@@ -1,5 +1,11 @@
 ---
-ansible_ssh_common_args: "-o ProxyJump=ubuntu@{{ hostvars[groups['bastion'][0]].ansible_host }}"
+# ansible_host is only set as an actual hostvar by the dynamic inventory. The
+# static inventory names hosts by their IP directly, so ansible_host is never
+# set there — fall back to inventory_hostname (always set, and it IS the IP
+# in that case) so this works with either inventory.
+ansible_ssh_common_args: >-
+  -o ProxyJump=ubuntu@{{ hostvars[groups['bastion'][0]].ansible_host
+  | default(hostvars[groups['bastion'][0]].inventory_hostname) }}
 
 app_container_name: agripulse
 app_host_port: 3000

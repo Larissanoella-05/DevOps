@@ -38,7 +38,11 @@
 
     - name: Install Docker SDK for Python (required by community.docker modules)
       ansible.builtin.pip:
-        name: docker
+        # requests>=2.32 breaks docker-py's local Unix-socket connection
+        # ("Not supported URL scheme http+docker"), so pin below that.
+        name:
+          - docker
+          - requests<2.32
         state: present
         executable: pip3
 

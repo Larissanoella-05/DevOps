@@ -2,7 +2,11 @@
 # Private IP of the app VM, resolved from whichever host Ansible finds in the
 # [app] inventory group — same trick app.yml uses for ProxyJump, so nothing
 # needs to be typed in by hand for either the static or dynamic inventory.
-app_upstream_host: "{{ hostvars[groups['app'][0]].ansible_host }}"
+# ansible_host falls back to inventory_hostname because the static inventory
+# names hosts by IP directly and never sets ansible_host as a real hostvar.
+app_upstream_host: >-
+  {{ hostvars[groups['app'][0]].ansible_host
+  | default(hostvars[groups['app'][0]].inventory_hostname) }}
 
 firewall_rules:
   - port: "{{ ssh_port }}"
