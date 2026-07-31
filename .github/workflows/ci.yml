@@ -7,6 +7,7 @@ on:
   pull_request:
     branches:
       - main
+  workflow_call:
 
 jobs:
   build-and-test:
@@ -97,3 +98,5 @@ jobs:
       uses: aquasecurity/tfsec-action@v1.0.0
       with:
         working_directory: terraform
+
+    
