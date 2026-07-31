@@ -8,6 +8,12 @@ on:
 permissions:
   id-token: write
   contents: read
+  # A reusable workflow's nested jobs can only be granted a subset of what
+  # the caller allows. ci.yml's build-and-test job needs packages: write to
+  # push to GHCR, so it must be granted here too, or GitHub rejects the
+  # whole workflow at parse time (this was the actual cause of every CD run
+  # ending in startup_failure with zero jobs created).
+  packages: write
 
 env:
   IMAGE_NAME: agripulse
