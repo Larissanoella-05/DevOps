@@ -6,6 +6,7 @@
 
   roles:
     - role: security
+    - role: proxy
 
 - name: Configure and deploy the AgriPulse application server
   hosts: app

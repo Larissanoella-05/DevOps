@@ -3,19 +3,21 @@
 Configures the two-tier AgriPulse deployment provisioned by the summative
 Terraform: a public **bastion** host and a private **app VM** with no public
 IP of its own. The playbook installs Docker, logs in to Azure Container
-Registry, deploys the app with Docker Compose, and hardens both hosts.
+Registry, deploys the app with Docker Compose, hardens both hosts, and runs
+an nginx reverse proxy on the bastion so the app is reachable over the web.
 
 ## Architecture
 
 ```
-        you / CD pipeline
-               │ SSH
-               ▼
-     ┌───────────────────┐   public subnet
-     │  bastion (public)  │   SSH hardened, jump host only
-     └─────────┬──────────┘
-               │ SSH (ProxyJump)
-               ▼
+        you / CD pipeline          web browsers
+               │ SSH                    │ HTTP :3000
+               ▼                        ▼
+     ┌─────────────────────────────────────┐   public subnet
+     │  bastion (public)                    │   SSH hardened, jump host,
+     │  nginx :3000 ──────────────┐         │   nginx reverse proxy
+     └─────────┬───────────────────┼─────────┘
+               │ SSH (ProxyJump)   │ HTTP, proxied to the app VM's
+               ▼                   ▼ private IP on :3000
      ┌───────────────────┐   private subnet
      │  app VM (private)  │   Docker + Compose, runs the container
      └────────────────────┘
@@ -25,7 +27,9 @@ Ansible never talks to the app VM directly — every connection is proxied
 through the bastion via `ProxyJump`. `group_vars/app.yml` computes that jump
 automatically from whichever host is in the `[bastion]` inventory group, so
 this works with either the static or the dynamic inventory without editing
-anything by hand.
+anything by hand. End users' web traffic takes a separate path: nginx on the
+bastion listens on the app port and forwards it to the app VM's private IP,
+computed the same automatic way in `group_vars/bastion.yml`.
 
 ## Prerequisites
 
@@ -116,10 +120,20 @@ Sanity-check what it finds with `ansible-inventory -i inventory/azure_rm.yml --g
 
 ## What gets configured
 
-**Bastion play** (`roles/security` only):
+**Bastion play** (`roles/security`, `roles/proxy`):
+
+`roles/security` — harden the bastion:
 - UFW: default-deny incoming, allow SSH (22), enabled
 - Root SSH login and password auth disabled, `sshd_config` validated with
   `sshd -t` before restart, backup kept
+
+`roles/proxy` — front public web traffic:
+- Installs nginx and removes its default site
+- Writes a reverse proxy config that listens on the app port and forwards
+  to the app VM's private IP (`app_upstream_host` in `group_vars/bastion.yml`,
+  resolved from the `[app]` inventory group the same way `ProxyJump` is)
+- Enables and starts nginx; reloads (not a full restart) only when the
+  config actually changes
 
 **App play** (`roles/docker`, `roles/app`, `roles/security`):
 
@@ -157,8 +171,17 @@ container's own logs on a failed deploy — instead of a bare traceback.
 
 ## Verifying the app after the playbook finishes
 
-The app VM has no public IP, so reach it the same way Ansible does — through
-the bastion:
+From your own machine, over the internet, through the bastion's reverse proxy:
+
+```bash
+curl -s http://<bastion_public_ip>:3000/api/prices
+```
+
+That should return a JSON response — no SSH needed for this check, since
+nginx on the bastion is now what's actually serving the request.
+
+To check the app VM itself (useful when the `curl` above fails and you need
+to see why), reach it the same way Ansible does — through the bastion:
 
 ```bash
 ssh -J ubuntu@<bastion_public_ip> ubuntu@<app_private_ip> 'docker compose -f /opt/agripulse/docker-compose.yml ps'
@@ -175,8 +198,3 @@ ssh -J ubuntu@<bastion_public_ip> ubuntu@<app_private_ip> 'curl -s http://localh
 - The managed PostgreSQL database Terraform provisions isn't wired into the
   app yet — it still persists to SQLite. Tracked as future work, same as on
   the Terraform side.
-- The bastion's NSG also opens the app port (3000) to the internet, intended
-  to front public web traffic and proxy it to the private app VM. That
-  reverse proxy isn't configured by this playbook yet — today the app is
-  only reachable from inside the VNet (or via SSH port-forwarding through
-  the bastion), not directly over HTTP from the internet.
