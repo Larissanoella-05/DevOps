@@ -1,0 +1,100 @@
+name: CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  IMAGE_NAME: agripulse
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+
+  #  Step 1: Run all CI checks 
+  ci:
+    name: CI Checks
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit
+
+  #  Steps 2 & 3: Build and push image to Azure ACR 
+  build-and-push:
+    name: Build & Push Image
+    needs: ci
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.set-image.outputs.image }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Step 4: Authenticate to Azure 
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Log in to ACR
+        uses: azure/docker-login@v2
+        with:
+          login-server: ${{ secrets.ACR_LOGIN_SERVER }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t ${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
+            -t ${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest \
+            .
+
+      - name: Push Docker image
+        run: |
+          docker push ${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          docker push ${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest
+
+      - name: Set image output
+        id: set-image
+        run: |
+          echo "image=${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}" >> "$GITHUB_OUTPUT"
+
+  # Step 5: Deploy via Ansible through bastion
+  deploy:
+    name: Deploy via Ansible
+    needs: build-and-push
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Ansible
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install ansible
+
+      - name: Set up SSH key and known hosts
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VM_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.BASTION_IP }} >> ~/.ssh/known_hosts
+          ssh-keyscan \
+            -o ProxyJump=azureuser@${{ secrets.BASTION_IP }} \
+            ${{ secrets.VM_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Run Ansible deploy playbook
+        working-directory: ansible
+        run: |
+          ansible-playbook -i inventory.ini deploy.yml \
+            --extra-vars "image=${{ needs.build-and-push.outputs.image }}" \
+            --extra-vars "acr_login_server=${{ secrets.ACR_LOGIN_SERVER }}" \
+            --extra-vars "acr_username=${{ secrets.ACR_USERNAME }}" \
+            --extra-vars "acr_password=${{ secrets.ACR_PASSWORD }}"
