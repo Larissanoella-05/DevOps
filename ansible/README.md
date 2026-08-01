@@ -102,9 +102,26 @@ with no new image pushed only touches things that actually drifted — the
 image pull is compared by digest, so the container is only recreated when
 the pulled image actually changed.
 
-The CD pipeline runs this same command as its final deploy step, after
-pushing a new image to ACR — that's what makes `docker compose up -d` pick
-up the new build.
+### `playbook.yml` vs `deploy.yml`
+
+`playbook.yml` is the full setup: hardens the bastion, installs Docker,
+deploys the app, hardens the app VM. Run this once against a freshly
+provisioned VM (or any time you want everything re-verified/re-hardened).
+
+`deploy.yml` is what the CD pipeline runs on every merge to `main` — just
+the app role, targeting the `app` group only. It doesn't touch the bastion
+or redo the security/UFW/Docker-install steps every single deploy, since
+those don't change between releases. It takes the image and registry
+credentials as extra vars, since CD passes those in directly rather than
+reading them from `group_vars`:
+
+```bash
+ansible-playbook -i inventory.ini deploy.yml \
+  --extra-vars "image=<registry>/agripulse:<tag>" \
+  --extra-vars "acr_login_server=<registry>" \
+  --extra-vars "acr_username=<username>" \
+  --extra-vars "acr_password=<password>"
+```
 
 ### Using dynamic inventory instead of the static file
 
