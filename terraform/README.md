@@ -122,14 +122,29 @@ terraform output -raw app_private_ip
 
 ## Remote state
 
-State is local by default. To store it remotely, create a storage account and
-container once, then uncomment the `backend "azurerm"` block in `main.tf` and
-re-run `terraform init`:
+State lives in Azure Blob Storage (`agripulsetfstate` storage account,
+`tfstate` container, `agripulse-tfstate-rg` resource group) — shared, and
+protected from any one person's laptop dying. Workspaces (dev/staging/prod)
+each get their own blob within the same container automatically.
+
+**If you already had a local `terraform.tfstate` from before this
+change**, running `terraform init` will detect the backend changed and offer
+to copy your local state into the remote backend — say yes exactly once,
+from whichever machine has the most up-to-date local state (check with your
+team first so this doesn't happen twice from two different laptops). After
+that, everyone runs `terraform init` normally and just gets the shared
+remote state — nothing local to manage.
+
+The bootstrap storage account/container above already exists and only needs
+creating once per project, which has been done. Keeping the commands here
+for reference (e.g. if this project is ever forked or the state store needs
+recreating from scratch):
 
 ```bash
 az group create --name agripulse-tfstate-rg --location centralindia
 az storage account create --name agripulsetfstate \
-  --resource-group agripulse-tfstate-rg --sku Standard_LRS
+  --resource-group agripulse-tfstate-rg --sku Standard_LRS \
+  --min-tls-version TLS1_2 --allow-blob-public-access false
 az storage container create --name tfstate --account-name agripulsetfstate
 ```
 

@@ -12,14 +12,17 @@ terraform {
     }
   }
 
-  # Remote state — enable once the storage account and container exist.
-  # See README.md ("Remote state") for the one-time bootstrap.
-  # backend "azurerm" {
-  #   resource_group_name  = "agripulse-tfstate-rg"
-  #   storage_account_name = "agripulsetfstate"
-  #   container_name       = "tfstate"
-  #   key                  = "summative.terraform.tfstate"
-  # }
+  # Remote state, in a storage account bootstrapped outside Terraform (see
+  # README.md "Remote state" for that one-time setup — Terraform can't
+  # create the backend that stores its own state). Workspaces (dev/staging/
+  # prod) are handled automatically: azurerm prefixes each workspace's
+  # blob with "env:<workspace>" within this same container.
+  backend "azurerm" {
+    resource_group_name  = "agripulse-tfstate-rg"
+    storage_account_name = "agripulsetfstate"
+    container_name       = "tfstate"
+    key                  = "summative.terraform.tfstate"
+  }
 }
 
 provider "azurerm" {
