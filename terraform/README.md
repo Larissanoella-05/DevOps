@@ -53,7 +53,10 @@ terraform/
 ├── main.tf            # provider, backend, resource group, module composition
 ├── variables.tf       # input variables (no hardcoded values)
 ├── outputs.tf         # exposed IPs, endpoints and resource IDs
-├── terraform.tfvars   # actual values for this deployment
+├── terraform.tfvars   # dev environment values (auto-loaded — this is the default)
+├── environments/
+│   ├── staging.tfvars # staging environment values
+│   └── prod.tfvars    # prod environment values
 └── modules/
     ├── network/       # VNet + public, private and delegated DB subnets
     ├── security/      # NSGs: bastion (public) and app (private) tiers
@@ -77,7 +80,41 @@ terraform apply                                   # create the infrastructure
 terraform destroy                                 # tear it all down when finished
 ```
 
-Values are read from `terraform.tfvars` automatically.
+Values are read from `terraform.tfvars` automatically — that's the **dev**
+environment, and the one currently deployed.
+
+## Environments
+
+`dev`, `staging`, and `prod` share the same module code; only the values in
+each environment's `.tfvars` file differ (VM/database sizing mainly — the
+network layout and security posture stay identical on purpose, so staging is
+a faithful rehearsal of prod, not a different shape).
+
+Each environment needs its own [Terraform
+workspace](https://developer.hashicorp.com/terraform/language/state/workspaces)
+so their state stays separate even with the local backend used today —
+without this, applying staging or prod would overwrite dev's state file.
+`dev` uses the default workspace (nothing extra to do); staging and prod
+need one extra command the first time:
+
+```bash
+# dev (default workspace, terraform.tfvars auto-loads)
+terraform apply
+
+# staging
+terraform workspace select -or-create staging
+terraform apply -var-file=environments/staging.tfvars
+
+# prod
+terraform workspace select -or-create prod
+terraform apply -var-file=environments/prod.tfvars
+
+# switch back to dev
+terraform workspace select default
+```
+
+Always check `terraform workspace show` before running `apply` or `destroy`
+— it's easy to forget which one you're on, and `destroy` doesn't ask twice.
 
 ## Resources created
 
