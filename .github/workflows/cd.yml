@@ -122,15 +122,18 @@ jobs:
           python3 -m pip install --upgrade pip
           pip install ansible
 
-      - name: Set up SSH key and known hosts
+      # No known_hosts pre-population here: ssh-keyscan has no "-o" flag for
+      # arbitrary SSH options (only capital "-O" for keyscan-specific ones,
+      # e.g. hash algorithm) -- it never supported "-o ProxyJump=..." on any
+      # OpenSSH version, so that command was guaranteed to fail every time
+      # (confirmed by reproducing it directly: "unknown option -- o"). It's
+      # also unnecessary: ansible.cfg already sets host_key_checking = False,
+      # so Ansible accepts new host keys on its own without this at all.
+      - name: Set up SSH key
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.VM_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.BASTION_IP }} >> ~/.ssh/known_hosts
-          ssh-keyscan \
-            -o ProxyJump=ubuntu@${{ secrets.BASTION_IP }} \
-            ${{ secrets.VM_HOST }} >> ~/.ssh/known_hosts
 
       - name: Run Ansible deploy playbook
         run: |
