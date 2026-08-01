@@ -103,7 +103,7 @@ jobs:
 
       - name: Allow this runner's IP through the bastion NSG
         run: |
-          RUNNER_IP="$(curl -s https://api.ipify.org)/32"
+          RUNNER_IP="$(curl -s -4 https://api.ipify.org)/32"
           echo "RUNNER_IP=$RUNNER_IP" >> "$GITHUB_ENV"
           az network nsg rule create \
             --resource-group "$RESOURCE_GROUP" \
