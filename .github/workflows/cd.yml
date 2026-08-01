@@ -77,9 +77,45 @@ jobs:
     needs: build-and-push
     runs-on: ubuntu-latest
 
+    env:
+      RESOURCE_GROUP: agripulse-dev-rg
+      NSG_NAME: agripulse-dev-bastion-nsg
+      TEMP_RULE_NAME: allow-cd-runner-temp
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      # The bastion NSG only allows SSH from a few named admin IPs
+      # (terraform/terraform.tfvars: ssh_ingress_cidrs) -- deliberately, so
+      # SSH isn't open to the whole internet. GitHub-hosted runners use a
+      # different IP every run, so without this, every CD deploy would be
+      # blocked at the network level before Ansible ever gets a chance to
+      # connect. This opens the door for just this one runner's IP, and the
+      # cleanup step at the end (which runs even if the deploy fails) closes
+      # it again immediately after.
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Allow this runner's IP through the bastion NSG
+        run: |
+          RUNNER_IP="$(curl -s https://api.ipify.org)/32"
+          echo "RUNNER_IP=$RUNNER_IP" >> "$GITHUB_ENV"
+          az network nsg rule create \
+            --resource-group "$RESOURCE_GROUP" \
+            --nsg-name "$NSG_NAME" \
+            --name "$TEMP_RULE_NAME" \
+            --priority 100 \
+            --direction Inbound \
+            --access Allow \
+            --protocol Tcp \
+            --destination-port-ranges 22 \
+            --source-address-prefixes "$RUNNER_IP" \
+            --output none
 
       - name: Install Ansible
         run: |
@@ -97,7 +133,6 @@ jobs:
             ${{ secrets.VM_HOST }} >> ~/.ssh/known_hosts
 
       - name: Run Ansible deploy playbook
-        working-directory: ansible
         run: |
           # --private-key overrides whatever ansible_ssh_private_key_file
           # happens to be committed in inventory.ini (that file reflects
@@ -109,3 +144,14 @@ jobs:
             --extra-vars "acr_login_server=${{ secrets.ACR_LOGIN_SERVER }}" \
             --extra-vars "acr_username=${{ secrets.ACR_USERNAME }}" \
             --extra-vars "acr_password=${{ secrets.ACR_PASSWORD }}"
+        working-directory: ansible
+
+      # Runs even if the deploy above failed -- the door must not stay open
+      # just because something else went wrong.
+      - name: Remove this runner's temporary NSG rule
+        if: always()
+        run: |
+          az network nsg rule delete \
+            --resource-group "$RESOURCE_GROUP" \
+            --nsg-name "$NSG_NAME" \
+            --name "$TEMP_RULE_NAME"
