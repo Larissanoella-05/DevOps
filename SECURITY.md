@@ -57,7 +57,13 @@ removed — tfsec now **hard-fails** the pipeline on any new IaC issue.
   Ansible's `security` role, only after confirming an `authorized_keys` entry
   exists so a misconfigured run can't lock everyone out).
 - **Firewall**: UFW default-denies incoming traffic on the VM, explicitly
-  allowing only SSH and the app port.
+  allowing only SSH and the web ports (80/443 on the bastion; the app port
+  only from the bastion's subnet on the app VM).
+- **Transport encryption**: the public app URL is HTTPS-only — nginx on the
+  bastion holds a real Let's Encrypt certificate (`roles/proxy` in Ansible),
+  and HTTP requests get a 301 redirect to HTTPS rather than being served in
+  plaintext. The bastion's NSG rule (`terraform/modules/security/main.tf`)
+  opens 80 and 443, not a raw app port, matching this.
 - **Access control**: each teammate uses their own SSH key pair
   (`extra_ssh_public_keys` in Terraform installs each public key
   individually) — no shared private keys.

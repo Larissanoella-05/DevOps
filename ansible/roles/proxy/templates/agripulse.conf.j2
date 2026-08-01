@@ -1,6 +1,10 @@
+## Managed by Ansible (roles/proxy). certbot --nginx edits this file in place
+## to add the 443/SSL server block and the HTTP->HTTPS redirect below --
+## don't hand-edit those parts, a re-run of this template would overwrite
+## everything except what certbot itself added after the fact.
 server {
-    listen {{ app_port }};
-    server_name _;
+    listen 80;
+    server_name {{ bastion_hostname }};
 
     location / {
         proxy_pass http://{{ app_upstream_host }}:{{ app_port }};

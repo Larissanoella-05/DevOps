@@ -30,3 +30,46 @@
     name: nginx
     enabled: true
     state: started
+
+- name: Install certbot and its nginx plugin
+  ansible.builtin.apt:
+    name:
+      - certbot
+      - python3-certbot-nginx
+    state: present
+
+- name: Obtain and install the Let's Encrypt certificate
+  # Deliberately no "creates:" guard: the nginx config gets re-templated
+  # every run (so it always reflects the current app_upstream_host), which
+  # wipes out the SSL server block certbot adds. Running certbot again is
+  # how that block gets put back. This is safe to run every time -- certbot
+  # detects a still-valid certificate for the same domain and reuses it
+  # rather than requesting a new one from Let's Encrypt, so this doesn't
+  # eat into Let's Encrypt's rate limits on a normal re-run.
+  block:
+    - name: Run certbot for {{ bastion_hostname }}
+      ansible.builtin.command:
+        cmd: >-
+          certbot --nginx
+          -d {{ bastion_hostname }}
+          --non-interactive --agree-tos
+          -m {{ letsencrypt_email }}
+          --redirect
+      register: certbot_result
+      changed_when: "'Successfully received certificate' in certbot_result.stdout"
+      notify: reload nginx
+  rescue:
+    - name: Report certificate request failure
+      ansible.builtin.fail:
+        msg: >-
+          Could not obtain a Let's Encrypt certificate for
+          {{ bastion_hostname }} on {{ inventory_hostname }}. This needs
+          port 80 reachable from the internet (Let's Encrypt's HTTP-01
+          challenge) — check the bastion NSG allows it, and that
+          {{ bastion_hostname }} actually resolves to this host's IP
+          (it should, automatically, via nip.io). Also check
+          https://letsencrypt.org/docs/rate-limits/ if this host has
+          requested a certificate for this hostname many times recently.
+
+# certbot's apt package installs its own systemd timer for renewal
+# (certbot.timer) enabled by default -- nothing else to configure here.

@@ -4,17 +4,18 @@ Configures the two-tier AgriPulse deployment provisioned by the summative
 Terraform: a public **bastion** host and a private **app VM** with no public
 IP of its own. The playbook installs Docker, logs in to Azure Container
 Registry, deploys the app with Docker Compose, hardens both hosts, and runs
-an nginx reverse proxy on the bastion so the app is reachable over the web.
+an nginx reverse proxy with a real Let's Encrypt TLS certificate on the
+bastion so the app is reachable over HTTPS.
 
 ## Architecture
 
 ```
         you / CD pipeline          web browsers
-               │ SSH                    │ HTTP :3000
+               │ SSH                    │ HTTPS :443 (HTTP :80 redirects)
                ▼                        ▼
      ┌─────────────────────────────────────┐   public subnet
      │  bastion (public)                    │   SSH hardened, jump host,
-     │  nginx :3000 ──────────────┐         │   nginx reverse proxy
+     │  nginx :80/:443 ────────────┐        │   nginx + Let's Encrypt TLS
      └─────────┬───────────────────┼─────────┘
                │ SSH (ProxyJump)   │ HTTP, proxied to the app VM's
                ▼                   ▼ private IP on :3000
@@ -22,6 +23,13 @@ an nginx reverse proxy on the bastion so the app is reachable over the web.
      │  app VM (private)  │   Docker + Compose, runs the container
      └────────────────────┘
 ```
+
+The public hostname is `<bastion_public_ip>.nip.io` — [nip.io](https://nip.io)
+maps that straight back to the bastion's IP with no DNS setup or purchased
+domain, just enough for Let's Encrypt to issue a real, browser-trusted
+certificate. If the bastion is ever recreated with a new IP, a fresh
+certificate for the new `<new-ip>.nip.io` hostname is obtained automatically
+next time the playbook runs — nothing to update by hand.
 
 Ansible never talks to the app VM directly — every connection is proxied
 through the bastion via `ProxyJump`. `group_vars/app.yml` computes that jump
@@ -144,11 +152,22 @@ Sanity-check what it finds with `ansible-inventory -i inventory/azure_rm.yml --g
 - Root SSH login and password auth disabled, `sshd_config` validated with
   `sshd -t` before restart, backup kept
 
-`roles/proxy` — front public web traffic:
+`roles/proxy` — front public web traffic over HTTPS:
 - Installs nginx and removes its default site
-- Writes a reverse proxy config that listens on the app port and forwards
-  to the app VM's private IP (`app_upstream_host` in `group_vars/bastion.yml`,
-  resolved from the `[app]` inventory group the same way `ProxyJump` is)
+- Writes a reverse proxy config that forwards to the app VM's private IP
+  (`app_upstream_host` in `group_vars/bastion.yml`, resolved from the
+  `[app]` inventory group the same way `ProxyJump` is)
+- Installs certbot and its nginx plugin, then runs it against
+  `bastion_hostname` (`<bastion_public_ip>.nip.io`) to obtain a real Let's
+  Encrypt certificate and wire it into nginx — this also adds the HTTP →
+  HTTPS redirect (certbot's `--nginx --redirect`, not hand-written config)
+- Runs certbot on every play, not just the first time: the nginx config
+  gets re-templated every run (so it always reflects the current
+  `app_upstream_host`), which would otherwise wipe out the SSL block
+  certbot added. Re-running certbot is what puts it back. This doesn't
+  eat into Let's Encrypt's rate limits on a normal re-run — certbot
+  detects the still-valid certificate for the same hostname and reuses it
+  rather than requesting a new one
 - Enables and starts nginx; reloads (not a full restart) only when the
   config actually changes
 
@@ -188,14 +207,17 @@ container's own logs on a failed deploy — instead of a bare traceback.
 
 ## Verifying the app after the playbook finishes
 
-From your own machine, over the internet, through the bastion's reverse proxy:
+From your own machine, over the real internet, through the bastion's TLS-terminated reverse proxy:
 
 ```bash
-curl -s http://<bastion_public_ip>:3000/api/prices
+curl -s https://<bastion_public_ip>.nip.io/api/prices
+curl -sI http://<bastion_public_ip>.nip.io/       # should 301 to https://
 ```
 
-That should return a JSON response — no SSH needed for this check, since
-nginx on the bastion is now what's actually serving the request.
+The HTTPS request should return a JSON response — no SSH needed for this
+check, since nginx on the bastion is now what's actually serving the
+request. `curl -v` instead of `-s` shows the certificate details if you want
+to confirm it's real (`issuer: ... Let's Encrypt`, not self-signed).
 
 To check the app VM itself (useful when the `curl` above fails and you need
 to see why), reach it the same way Ansible does — through the bastion:
