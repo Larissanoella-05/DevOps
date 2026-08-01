@@ -23,16 +23,17 @@ resource "azurerm_network_security_group" "bastion" {
   }
 
   security_rule {
-    name                   = "allow-app"
-    description            = "Public web traffic to the app, proxied to the private VM"
-    priority               = 1002
-    direction              = "Inbound"
-    access                 = "Allow"
-    protocol               = "Tcp"
-    source_port_range      = "*"
-    destination_port_range = tostring(var.app_port)
-    # AgriPulse is a public web app, so this port is meant to be internet-reachable.
-    # SSH stays restricted to admin IPs above. Documented in SECURITY.md.
+    name                    = "allow-web"
+    description             = "Public HTTP (redirects to HTTPS) and HTTPS, proxied to the private VM"
+    priority                = 1002
+    direction               = "Inbound"
+    access                  = "Allow"
+    protocol                = "Tcp"
+    source_port_range       = "*"
+    destination_port_ranges = ["80", "443"]
+    # AgriPulse is a public web app, so these ports are meant to be
+    # internet-reachable. SSH stays restricted to admin IPs above.
+    # Documented in SECURITY.md.
     # tfsec:ignore:azure-network-no-public-ingress
     source_address_prefix      = var.app_ingress_cidr
     destination_address_prefix = "*"

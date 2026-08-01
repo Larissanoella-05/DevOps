@@ -10,4 +10,18 @@ app_upstream_host: >-
 
 firewall_rules:
   - port: "{{ ssh_port }}"
-  - port: "{{ app_port }}"
+  - port: "80"
+  - port: "443"
+
+# nip.io maps "<ip>.nip.io" straight back to that IP, no DNS setup or
+# purchased domain needed -- just enough for Let's Encrypt to issue a real,
+# browser-trusted certificate against a hostname. Recomputes automatically
+# if the bastion is ever recreated with a new IP; the old cert for the old
+# hostname is simply abandoned, and a fresh one is issued for the new one.
+bastion_hostname: "{{ ansible_host | default(inventory_hostname) }}.nip.io"
+
+# Required by Let's Encrypt for renewal/expiry notices. Doesn't need to be a
+# monitored inbox, but the domain part must end in a real public TLD --
+# Let's Encrypt validates against the public suffix list (rejects reserved
+# ones like .example, .test, .invalid), it just doesn't check deliverability.
+letsencrypt_email: "devops@agripulse.com"

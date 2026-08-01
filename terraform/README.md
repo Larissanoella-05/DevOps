@@ -146,7 +146,7 @@ Full list with defaults is in `variables.tf`.
 
 | Output | Used by |
 | --- | --- |
-| `bastion_public_ip` | Ansible inventory (public host) + public app URL |
+| `bastion_public_ip` | Ansible inventory (public host). The public app URL is `https://<this-ip>.nip.io` — Ansible obtains a Let's Encrypt certificate for that hostname automatically |
 | `app_private_ip` | Ansible inventory (private target host) |
 | `acr_login_server` | CD pipeline — where images are pushed/pulled |
 | `acr_admin_username` / `acr_admin_password` | CD pipeline `docker login` (password is sensitive) |

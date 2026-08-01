@@ -20,7 +20,7 @@ admin_username  = "ubuntu"
 ssh_ingress_cidrs = [
   "102.22.143.60/32",   # Joshua — runs Terraform
   "197.157.184.193/32", # Emerance — runs the Ansible playbook
-  "102.22.178.183/32",  # Larissa — verifying the summative deployment
+  "102.22.141.183/32",  # Larissa — verifying the summative deployment
 ]
 
 ssh_public_key_path = "~/.ssh/id_ed25519.pub"
