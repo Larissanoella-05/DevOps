@@ -93,13 +93,18 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H ${{ secrets.BASTION_IP }} >> ~/.ssh/known_hosts
           ssh-keyscan \
-            -o ProxyJump=azureuser@${{ secrets.BASTION_IP }} \
+            -o ProxyJump=ubuntu@${{ secrets.BASTION_IP }} \
             ${{ secrets.VM_HOST }} >> ~/.ssh/known_hosts
 
       - name: Run Ansible deploy playbook
         working-directory: ansible
         run: |
+          # --private-key overrides whatever ansible_ssh_private_key_file
+          # happens to be committed in inventory.ini (that file reflects
+          # whoever last tested locally with their own key) so CD always
+          # uses the key it just wrote above, regardless of that.
           ansible-playbook -i inventory.ini deploy.yml \
+            --private-key ~/.ssh/id_rsa \
             --extra-vars "image=${{ needs.build-and-push.outputs.image }}" \
             --extra-vars "acr_login_server=${{ secrets.ACR_LOGIN_SERVER }}" \
             --extra-vars "acr_username=${{ secrets.ACR_USERNAME }}" \
