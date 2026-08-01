@@ -19,7 +19,7 @@ admin_username  = "ubuntu"
 # Update these if an ISP reassigns an address.
 ssh_ingress_cidrs = [
   "102.22.143.60/32",   # Joshua — runs Terraform
-  "197.157.184.193/32", # Emerance — runs the Ansible playbook
+  "197.157.145.135/32", # Emerance — runs the Ansible playbook
   "102.22.178.183/32",  # Larissa — verifying the summative deployment
 ]
 
