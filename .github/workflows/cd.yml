@@ -157,18 +157,15 @@ jobs:
 
       - name: Run Ansible deploy playbook
         run: |
-          # --private-key overrides whatever ansible_ssh_private_key_file
-          # happens to be committed in inventory.ini (that file reflects
-          # whoever last tested locally with their own key) so CD always
-          # uses the key it just wrote above, regardless of that.
-          #
-          # TEMPORARY -vvv: this step fails on every CD run with "Connection
-          # to UNKNOWN port 65535" (a malformed ProxyJump argument, not a
-          # real network timeout), but the exact same command reproduces
-          # fine locally. -vvv prints the actual constructed SSH command so
-          # we can see what CD's environment computes differently. Remove
-          # once root-caused.
-          ansible-playbook -i inventory.ini deploy.yml -vvv \
+          # --private-key tells Ansible which key to use. inventory.ini no
+          # longer hardcodes ansible_ssh_private_key_file (it used to,
+          # pointing at ~/.ssh/id_ed25519) -- that inventory-level setting
+          # actually takes precedence over --private-key, not the other way
+          # around, which silently broke every CD deploy: id_ed25519 never
+          # existed on this runner, only the id_rsa written above. Confirmed
+          # via -vvv output showing the wrong IdentityFile being used, and
+          # fixed by removing the hardcoded path from inventory.ini instead.
+          ansible-playbook -i inventory.ini deploy.yml \
             --private-key ~/.ssh/id_rsa \
             --extra-vars "image=${{ needs.build-and-push.outputs.image }}" \
             --extra-vars "acr_login_server=${{ secrets.ACR_LOGIN_SERVER }}" \
