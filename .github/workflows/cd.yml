@@ -155,15 +155,26 @@ jobs:
           echo "${{ secrets.VM_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
 
-      # TEMPORARY diagnostic. The previous fix (removing inventory.ini's
-      # hardcoded ansible_ssh_private_key_file) was real and necessary, but
-      # the real CD run still failed afterward with the identical
-      # "Connection closed by UNKNOWN port 65535" symptom -- so there's a
-      # second, still-unknown cause. This isolates the simplest possible
-      # question first: does VM_SSH_PRIVATE_KEY even authenticate to the
-      # bastion directly, with no ProxyJump/Ansible involved at all?
-      - name: Diagnostic - direct SSH to bastion (no ProxyJump)
+      # TEMPORARY diagnostic. The direct-SSH test below timed out completely
+      # (pure network timeout, not an auth error) even though this exact
+      # runner's IP was just allowed through the NSG. Leading theory:
+      # GitHub-hosted runners don't guarantee the same outbound IP for two
+      # separate connections in the same job -- the IP curl detected for the
+      # NSG rule may not be the IP actually used when ssh connects moments
+      # later. This re-checks the IP right before the SSH attempt and
+      # compares it to $RUNNER_IP (set two steps ago) to confirm or rule
+      # that out directly, instead of assuming it.
+      - name: Diagnostic - re-check outbound IP, then direct SSH to bastion
         run: |
+          CURRENT_IP="$(curl -s -4 https://api.ipify.org)"
+          echo "RUNNER_IP used for the NSG rule: $RUNNER_IP"
+          echo "Outbound IP right now:           $CURRENT_IP/32"
+          if [ "$RUNNER_IP" != "$CURRENT_IP/32" ]; then
+            echo "::error::IP MISMATCH -- the NSG rule allows $RUNNER_IP but this runner is now egressing as $CURRENT_IP/32. This is almost certainly the actual bug."
+          else
+            echo "IPs match -- ruling out the IP-instability theory."
+          fi
+
           ssh -vvv -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
             -i ~/.ssh/id_rsa ubuntu@${{ secrets.BASTION_IP }} 'echo BASTION_SSH_OK' \
             2>&1 | tail -80 || echo "DIRECT SSH TO BASTION FAILED (see above)"
