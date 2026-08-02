@@ -41,9 +41,14 @@ On your control machine (the one running `ansible-playbook`):
   ansible-galaxy collection install -r requirements.yml
   ```
 - An SSH key pair, with the **public** key already installed on both VMs
-  (Terraform does this via `ssh_public_key_path` / `extra_ssh_public_keys`)
-  and the **private** key available locally at the path referenced in
-  `inventory.ini` (default `~/.ssh/id_rsa`).
+  (Terraform does this via `ssh_public_key_path` / `extra_ssh_public_keys`).
+  Point Ansible at your **private** key with `--private-key`, shown below —
+  don't hardcode a path in `inventory.ini` itself. Inventory-level
+  `ansible_ssh_private_key_file` takes precedence over `--private-key`, so a
+  hardcoded path there silently overrides whatever key you actually meant
+  to use, including CD's. That's exactly what broke CD's deploy step: the
+  file used to hardcode `~/.ssh/id_ed25519`, which only happened to exist
+  on whoever tested locally, never on the GitHub Actions runner.
 - ACR credentials exported as environment variables (never committed):
   ```bash
   export ACR_LOGIN_SERVER=$(terraform -chdir=../terraform output -raw acr_login_server)
@@ -69,32 +74,34 @@ Put those in `inventory.ini`:
 
 ```ini
 [bastion]
-<bastion_public_ip> ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa
+<bastion_public_ip> ansible_user=ubuntu
 
 [app]
-<app_private_ip> ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa
+<app_private_ip> ansible_user=ubuntu
 
 [app:vars]
 ansible_python_interpreter=/usr/bin/python3
 ```
 
 No `ProxyJump` line is needed here — `group_vars/app.yml` builds it from the
-`[bastion]` group at run time.
+`[bastion]` group at run time. No private key path here either — pass it
+explicitly with `--private-key` on every run (see below), so it's always
+clear which key is actually being used.
 
 ## Running the playbook
 
 From the `ansible/` directory, with the `ACR_*` variables exported:
 
 ```bash
-ansible-playbook -i inventory.ini playbook.yml
+ansible-playbook -i inventory.ini playbook.yml --private-key ~/.ssh/id_ed25519
 ```
 
 Useful flags while working on it:
 
 ```bash
-ansible-playbook -i inventory.ini playbook.yml --syntax-check   # validate YAML/module args
-ansible-playbook -i inventory.ini playbook.yml --check          # dry run
-ansible-playbook -i inventory.ini playbook.yml -vv              # verbose output
+ansible-playbook -i inventory.ini playbook.yml --private-key ~/.ssh/id_ed25519 --syntax-check   # validate YAML/module args
+ansible-playbook -i inventory.ini playbook.yml --private-key ~/.ssh/id_ed25519 --check          # dry run
+ansible-playbook -i inventory.ini playbook.yml --private-key ~/.ssh/id_ed25519 -vv              # verbose output
 ```
 
 It's safe to re-run any time. Every task is idempotent, and a second run
