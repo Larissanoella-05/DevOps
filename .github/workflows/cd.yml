@@ -141,7 +141,14 @@ jobs:
           # happens to be committed in inventory.ini (that file reflects
           # whoever last tested locally with their own key) so CD always
           # uses the key it just wrote above, regardless of that.
-          ansible-playbook -i inventory.ini deploy.yml \
+          #
+          # TEMPORARY -vvv: this step fails on every CD run with "Connection
+          # to UNKNOWN port 65535" (a malformed ProxyJump argument, not a
+          # real network timeout), but the exact same command reproduces
+          # fine locally. -vvv prints the actual constructed SSH command so
+          # we can see what CD's environment computes differently. Remove
+          # once root-caused.
+          ansible-playbook -i inventory.ini deploy.yml -vvv \
             --private-key ~/.ssh/id_rsa \
             --extra-vars "image=${{ needs.build-and-push.outputs.image }}" \
             --extra-vars "acr_login_server=${{ secrets.ACR_LOGIN_SERVER }}" \
