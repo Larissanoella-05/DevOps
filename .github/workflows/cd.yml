@@ -105,17 +105,37 @@ jobs:
         run: |
           RUNNER_IP="$(curl -s -4 https://api.ipify.org)/32"
           echo "RUNNER_IP=$RUNNER_IP" >> "$GITHUB_ENV"
-          az network nsg rule create \
-            --resource-group "$RESOURCE_GROUP" \
-            --nsg-name "$NSG_NAME" \
-            --name "$TEMP_RULE_NAME" \
-            --priority 100 \
-            --direction Inbound \
-            --access Allow \
-            --protocol Tcp \
-            --destination-port-ranges 22 \
-            --source-address-prefixes "$RUNNER_IP" \
-            --output none
+
+          # az CLI on this runner has hit a genuine upstream bug: a Python
+          # import deadlock inside MSAL's lazy "import requests" from a
+          # background credential-polling thread
+          # (_frozen_importlib._DeadlockError, seen on Python 3.14). Not
+          # anything in our config -- it's intermittent, and retrying is
+          # the accepted mitigation for this specific class of az CLI
+          # flakiness rather than something we can fix on our end.
+          success=false
+          for attempt in 1 2 3; do
+            if az network nsg rule create \
+              --resource-group "$RESOURCE_GROUP" \
+              --nsg-name "$NSG_NAME" \
+              --name "$TEMP_RULE_NAME" \
+              --priority 100 \
+              --direction Inbound \
+              --access Allow \
+              --protocol Tcp \
+              --destination-port-ranges 22 \
+              --source-address-prefixes "$RUNNER_IP" \
+              --output none; then
+              success=true
+              break
+            fi
+            echo "::warning::az network nsg rule create failed (attempt $attempt/3), retrying in 5s..."
+            sleep 5
+          done
+          if [ "$success" != true ]; then
+            echo "::error::az network nsg rule create failed after 3 attempts"
+            exit 1
+          fi
 
       - name: Install Ansible
         run: |
@@ -157,11 +177,25 @@ jobs:
         working-directory: ansible
 
       # Runs even if the deploy above failed -- the door must not stay open
-      # just because something else went wrong.
+      # just because something else went wrong. Retried for the same
+      # az-CLI-deadlock reason as the create step above: this cleanup must
+      # not silently no-op just because it hit the same transient bug.
       - name: Remove this runner's temporary NSG rule
         if: always()
         run: |
-          az network nsg rule delete \
-            --resource-group "$RESOURCE_GROUP" \
-            --nsg-name "$NSG_NAME" \
-            --name "$TEMP_RULE_NAME"
+          success=false
+          for attempt in 1 2 3; do
+            if az network nsg rule delete \
+              --resource-group "$RESOURCE_GROUP" \
+              --nsg-name "$NSG_NAME" \
+              --name "$TEMP_RULE_NAME"; then
+              success=true
+              break
+            fi
+            echo "::warning::az network nsg rule delete failed (attempt $attempt/3), retrying in 5s..."
+            sleep 5
+          done
+          if [ "$success" != true ]; then
+            echo "::error::az network nsg rule delete failed after 3 attempts -- the temporary rule may still be open, check manually"
+            exit 1
+          fi
