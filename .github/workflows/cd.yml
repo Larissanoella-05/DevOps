@@ -137,6 +137,29 @@ jobs:
             exit 1
           fi
 
+      # Direct SSH to the bastion still times out even with a confirmed-correct
+      # source IP (see the diagnostic step further down). The two remaining
+      # explanations are: (a) BASTION_IP is stale and doesn't point at the real
+      # bastion, or (b) the temp rule above isn't actually landing where we
+      # think. This settles both without needing anyone to check Azure by hand.
+      - name: Diagnostic - confirm the temp NSG rule actually exists as expected
+        run: |
+          az network nsg rule show \
+            --resource-group "$RESOURCE_GROUP" \
+            --nsg-name "$NSG_NAME" \
+            --name "$TEMP_RULE_NAME" \
+            -o table
+
+      - name: Diagnostic - confirm BASTION_IP secret matches the live bastion IP
+        run: |
+          LIVE_BASTION_IP="$(az vm show -d --resource-group "$RESOURCE_GROUP" --name agripulse-dev-bastion --query publicIps -o tsv)"
+          if [ "$LIVE_BASTION_IP" = "${{ secrets.BASTION_IP }}" ]; then
+            echo "BASTION_IP secret matches the live bastion public IP."
+          else
+            echo "::error::BASTION_IP secret does NOT match the live bastion's actual public IP -- update the BASTION_IP secret."
+            exit 1
+          fi
+
       - name: Install Ansible
         run: |
           python3 -m pip install --upgrade pip
