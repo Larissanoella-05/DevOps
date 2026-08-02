@@ -179,6 +179,23 @@ jobs:
             -i ~/.ssh/id_rsa ubuntu@${{ secrets.BASTION_IP }} 'echo BASTION_SSH_OK' \
             2>&1 | tail -80 || echo "DIRECT SSH TO BASTION FAILED (see above)"
 
+      # GitHub Actions doesn't always reliably restore an upstream job's
+      # outputs when only failed jobs are re-run (a known platform gotcha,
+      # not something in our config) -- this bit us directly: a re-run left
+      # needs.build-and-push.outputs.image blank, which flowed silently all
+      # the way into a rendered docker-compose.yml with image: "", and only
+      # surfaced ~60s later as an opaque wait_for timeout with no useful
+      # logs (docker compose itself refuses to run against an empty image
+      # field, so even the rescue block's log collection came back empty).
+      # Failing here instead turns that into an immediate, actionable error.
+      - name: Verify the built image reference before deploying
+        run: |
+          if [ -z "${{ needs.build-and-push.outputs.image }}" ]; then
+            echo "::error::needs.build-and-push.outputs.image is empty -- refusing to deploy with a blank image reference. If this run was triggered by 'Re-run failed jobs', use 'Re-run all jobs' instead so build-and-push's outputs are regenerated rather than restored."
+            exit 1
+          fi
+          echo "Deploying image: ${{ needs.build-and-push.outputs.image }}"
+
       - name: Run Ansible deploy playbook
         run: |
           # --private-key tells Ansible which key to use. inventory.ini no
