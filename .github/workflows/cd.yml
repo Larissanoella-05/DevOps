@@ -155,6 +155,19 @@ jobs:
           echo "${{ secrets.VM_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
 
+      # TEMPORARY diagnostic. The previous fix (removing inventory.ini's
+      # hardcoded ansible_ssh_private_key_file) was real and necessary, but
+      # the real CD run still failed afterward with the identical
+      # "Connection closed by UNKNOWN port 65535" symptom -- so there's a
+      # second, still-unknown cause. This isolates the simplest possible
+      # question first: does VM_SSH_PRIVATE_KEY even authenticate to the
+      # bastion directly, with no ProxyJump/Ansible involved at all?
+      - name: Diagnostic - direct SSH to bastion (no ProxyJump)
+        run: |
+          ssh -vvv -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+            -i ~/.ssh/id_rsa ubuntu@${{ secrets.BASTION_IP }} 'echo BASTION_SSH_OK' \
+            2>&1 | tail -80 || echo "DIRECT SSH TO BASTION FAILED (see above)"
+
       - name: Run Ansible deploy playbook
         run: |
           # --private-key tells Ansible which key to use. inventory.ini no
@@ -165,7 +178,9 @@ jobs:
           # existed on this runner, only the id_rsa written above. Confirmed
           # via -vvv output showing the wrong IdentityFile being used, and
           # fixed by removing the hardcoded path from inventory.ini instead.
-          ansible-playbook -i inventory.ini deploy.yml \
+          # Still investigating a second cause -- see the diagnostic step
+          # above and -vvv here.
+          ansible-playbook -i inventory.ini deploy.yml -vvv \
             --private-key ~/.ssh/id_rsa \
             --extra-vars "image=${{ needs.build-and-push.outputs.image }}" \
             --extra-vars "acr_login_server=${{ secrets.ACR_LOGIN_SERVER }}" \
