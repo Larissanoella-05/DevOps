@@ -53,7 +53,10 @@ terraform/
 ├── main.tf            # provider, backend, resource group, module composition
 ├── variables.tf       # input variables (no hardcoded values)
 ├── outputs.tf         # exposed IPs, endpoints and resource IDs
-├── terraform.tfvars   # actual values for this deployment
+├── terraform.tfvars   # dev environment values (auto-loaded — this is the default)
+├── environments/
+│   ├── staging.tfvars # staging environment values
+│   └── prod.tfvars    # prod environment values
 └── modules/
     ├── network/       # VNet + public, private and delegated DB subnets
     ├── security/      # NSGs: bastion (public) and app (private) tiers
@@ -77,7 +80,41 @@ terraform apply                                   # create the infrastructure
 terraform destroy                                 # tear it all down when finished
 ```
 
-Values are read from `terraform.tfvars` automatically.
+Values are read from `terraform.tfvars` automatically — that's the **dev**
+environment, and the one currently deployed.
+
+## Environments
+
+`dev`, `staging`, and `prod` share the same module code; only the values in
+each environment's `.tfvars` file differ (VM/database sizing mainly — the
+network layout and security posture stay identical on purpose, so staging is
+a faithful rehearsal of prod, not a different shape).
+
+Each environment needs its own [Terraform
+workspace](https://developer.hashicorp.com/terraform/language/state/workspaces)
+so their state stays separate even with the local backend used today —
+without this, applying staging or prod would overwrite dev's state file.
+`dev` uses the default workspace (nothing extra to do); staging and prod
+need one extra command the first time:
+
+```bash
+# dev (default workspace, terraform.tfvars auto-loads)
+terraform apply
+
+# staging
+terraform workspace select -or-create staging
+terraform apply -var-file=environments/staging.tfvars
+
+# prod
+terraform workspace select -or-create prod
+terraform apply -var-file=environments/prod.tfvars
+
+# switch back to dev
+terraform workspace select default
+```
+
+Always check `terraform workspace show` before running `apply` or `destroy`
+— it's easy to forget which one you're on, and `destroy` doesn't ask twice.
 
 ## Resources created
 
@@ -122,14 +159,29 @@ terraform output -raw app_private_ip
 
 ## Remote state
 
-State is local by default. To store it remotely, create a storage account and
-container once, then uncomment the `backend "azurerm"` block in `main.tf` and
-re-run `terraform init`:
+State lives in Azure Blob Storage (`agripulsetfstate` storage account,
+`tfstate` container, `agripulse-tfstate-rg` resource group) — shared, and
+protected from any one person's laptop dying. Workspaces (dev/staging/prod)
+each get their own blob within the same container automatically.
+
+**If you already had a local `terraform.tfstate` from before this
+change**, running `terraform init` will detect the backend changed and offer
+to copy your local state into the remote backend — say yes exactly once,
+from whichever machine has the most up-to-date local state (check with your
+team first so this doesn't happen twice from two different laptops). After
+that, everyone runs `terraform init` normally and just gets the shared
+remote state — nothing local to manage.
+
+The bootstrap storage account/container above already exists and only needs
+creating once per project, which has been done. Keeping the commands here
+for reference (e.g. if this project is ever forked or the state store needs
+recreating from scratch):
 
 ```bash
 az group create --name agripulse-tfstate-rg --location centralindia
 az storage account create --name agripulsetfstate \
-  --resource-group agripulse-tfstate-rg --sku Standard_LRS
+  --resource-group agripulse-tfstate-rg --sku Standard_LRS \
+  --min-tls-version TLS1_2 --allow-blob-public-access false
 az storage container create --name tfstate --account-name agripulsetfstate
 ```
 

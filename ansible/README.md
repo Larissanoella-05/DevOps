@@ -3,19 +3,21 @@
 Configures the two-tier AgriPulse deployment provisioned by the summative
 Terraform: a public **bastion** host and a private **app VM** with no public
 IP of its own. The playbook installs Docker, logs in to Azure Container
-Registry, deploys the app with Docker Compose, and hardens both hosts.
+Registry, deploys the app with Docker Compose, hardens both hosts, and runs
+an nginx reverse proxy on the bastion so the app is reachable over the web.
 
 ## Architecture
 
 ```
-        you / CD pipeline
-               │ SSH
-               ▼
-     ┌───────────────────┐   public subnet
-     │  bastion (public)  │   SSH hardened, jump host only
-     └─────────┬──────────┘
-               │ SSH (ProxyJump)
-               ▼
+        you / CD pipeline          web browsers
+               │ SSH                    │ HTTP :3000
+               ▼                        ▼
+     ┌─────────────────────────────────────┐   public subnet
+     │  bastion (public)                    │   SSH hardened, jump host,
+     │  nginx :3000 ──────────────┐         │   nginx reverse proxy
+     └─────────┬───────────────────┼─────────┘
+               │ SSH (ProxyJump)   │ HTTP, proxied to the app VM's
+               ▼                   ▼ private IP on :3000
      ┌───────────────────┐   private subnet
      │  app VM (private)  │   Docker + Compose, runs the container
      └────────────────────┘
@@ -25,7 +27,9 @@ Ansible never talks to the app VM directly — every connection is proxied
 through the bastion via `ProxyJump`. `group_vars/app.yml` computes that jump
 automatically from whichever host is in the `[bastion]` inventory group, so
 this works with either the static or the dynamic inventory without editing
-anything by hand.
+anything by hand. End users' web traffic takes a separate path: nginx on the
+bastion listens on the app port and forwards it to the app VM's private IP,
+computed the same automatic way in `group_vars/bastion.yml`.
 
 ## Prerequisites
 
@@ -37,9 +41,14 @@ On your control machine (the one running `ansible-playbook`):
   ansible-galaxy collection install -r requirements.yml
   ```
 - An SSH key pair, with the **public** key already installed on both VMs
-  (Terraform does this via `ssh_public_key_path` / `extra_ssh_public_keys`)
-  and the **private** key available locally at the path referenced in
-  `inventory.ini` (default `~/.ssh/id_rsa`).
+  (Terraform does this via `ssh_public_key_path` / `extra_ssh_public_keys`).
+  Point Ansible at your **private** key with `--private-key`, shown below —
+  don't hardcode a path in `inventory.ini` itself. Inventory-level
+  `ansible_ssh_private_key_file` takes precedence over `--private-key`, so a
+  hardcoded path there silently overrides whatever key you actually meant
+  to use, including CD's. That's exactly what broke CD's deploy step: the
+  file used to hardcode `~/.ssh/id_ed25519`, which only happened to exist
+  on whoever tested locally, never on the GitHub Actions runner.
 - ACR credentials exported as environment variables (never committed):
   ```bash
   export ACR_LOGIN_SERVER=$(terraform -chdir=../terraform output -raw acr_login_server)
@@ -65,32 +74,34 @@ Put those in `inventory.ini`:
 
 ```ini
 [bastion]
-<bastion_public_ip> ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa
+<bastion_public_ip> ansible_user=ubuntu
 
 [app]
-<app_private_ip> ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa
+<app_private_ip> ansible_user=ubuntu
 
 [app:vars]
 ansible_python_interpreter=/usr/bin/python3
 ```
 
 No `ProxyJump` line is needed here — `group_vars/app.yml` builds it from the
-`[bastion]` group at run time.
+`[bastion]` group at run time. No private key path here either — pass it
+explicitly with `--private-key` on every run (see below), so it's always
+clear which key is actually being used.
 
 ## Running the playbook
 
 From the `ansible/` directory, with the `ACR_*` variables exported:
 
 ```bash
-ansible-playbook -i inventory.ini playbook.yml
+ansible-playbook -i inventory.ini playbook.yml --private-key ~/.ssh/id_ed25519
 ```
 
 Useful flags while working on it:
 
 ```bash
-ansible-playbook -i inventory.ini playbook.yml --syntax-check   # validate YAML/module args
-ansible-playbook -i inventory.ini playbook.yml --check          # dry run
-ansible-playbook -i inventory.ini playbook.yml -vv              # verbose output
+ansible-playbook -i inventory.ini playbook.yml --private-key ~/.ssh/id_ed25519 --syntax-check   # validate YAML/module args
+ansible-playbook -i inventory.ini playbook.yml --private-key ~/.ssh/id_ed25519 --check          # dry run
+ansible-playbook -i inventory.ini playbook.yml --private-key ~/.ssh/id_ed25519 -vv              # verbose output
 ```
 
 It's safe to re-run any time. Every task is idempotent, and a second run
@@ -98,9 +109,26 @@ with no new image pushed only touches things that actually drifted — the
 image pull is compared by digest, so the container is only recreated when
 the pulled image actually changed.
 
-The CD pipeline runs this same command as its final deploy step, after
-pushing a new image to ACR — that's what makes `docker compose up -d` pick
-up the new build.
+### `playbook.yml` vs `deploy.yml`
+
+`playbook.yml` is the full setup: hardens the bastion, installs Docker,
+deploys the app, hardens the app VM. Run this once against a freshly
+provisioned VM (or any time you want everything re-verified/re-hardened).
+
+`deploy.yml` is what the CD pipeline runs on every merge to `main` — just
+the app role, targeting the `app` group only. It doesn't touch the bastion
+or redo the security/UFW/Docker-install steps every single deploy, since
+those don't change between releases. It takes the image and registry
+credentials as extra vars, since CD passes those in directly rather than
+reading them from `group_vars`:
+
+```bash
+ansible-playbook -i inventory.ini deploy.yml \
+  --extra-vars "image=<registry>/agripulse:<tag>" \
+  --extra-vars "acr_login_server=<registry>" \
+  --extra-vars "acr_username=<username>" \
+  --extra-vars "acr_password=<password>"
+```
 
 ### Using dynamic inventory instead of the static file
 
@@ -116,10 +144,20 @@ Sanity-check what it finds with `ansible-inventory -i inventory/azure_rm.yml --g
 
 ## What gets configured
 
-**Bastion play** (`roles/security` only):
+**Bastion play** (`roles/security`, `roles/proxy`):
+
+`roles/security` — harden the bastion:
 - UFW: default-deny incoming, allow SSH (22), enabled
 - Root SSH login and password auth disabled, `sshd_config` validated with
   `sshd -t` before restart, backup kept
+
+`roles/proxy` — front public web traffic:
+- Installs nginx and removes its default site
+- Writes a reverse proxy config that listens on the app port and forwards
+  to the app VM's private IP (`app_upstream_host` in `group_vars/bastion.yml`,
+  resolved from the `[app]` inventory group the same way `ProxyJump` is)
+- Enables and starts nginx; reloads (not a full restart) only when the
+  config actually changes
 
 **App play** (`roles/docker`, `roles/app`, `roles/security`):
 
@@ -157,8 +195,17 @@ container's own logs on a failed deploy — instead of a bare traceback.
 
 ## Verifying the app after the playbook finishes
 
-The app VM has no public IP, so reach it the same way Ansible does — through
-the bastion:
+From your own machine, over the internet, through the bastion's reverse proxy:
+
+```bash
+curl -s http://<bastion_public_ip>:3000/api/prices
+```
+
+That should return a JSON response — no SSH needed for this check, since
+nginx on the bastion is now what's actually serving the request.
+
+To check the app VM itself (useful when the `curl` above fails and you need
+to see why), reach it the same way Ansible does — through the bastion:
 
 ```bash
 ssh -J ubuntu@<bastion_public_ip> ubuntu@<app_private_ip> 'docker compose -f /opt/agripulse/docker-compose.yml ps'
@@ -175,8 +222,3 @@ ssh -J ubuntu@<bastion_public_ip> ubuntu@<app_private_ip> 'curl -s http://localh
 - The managed PostgreSQL database Terraform provisions isn't wired into the
   app yet — it still persists to SQLite. Tracked as future work, same as on
   the Terraform side.
-- The bastion's NSG also opens the app port (3000) to the internet, intended
-  to front public web traffic and proxy it to the private app VM. That
-  reverse proxy isn't configured by this playbook yet — today the app is
-  only reachable from inside the VNet (or via SSH port-forwarding through
-  the bastion), not directly over HTTP from the internet.

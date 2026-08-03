@@ -1,0 +1,19 @@
+---
+- name: Deploy the AgriPulse application
+  hosts: app
+  become: true
+  gather_facts: true
+
+  # cd.yml passes these via --extra-vars after building and pushing a fresh
+  # image; map them onto the names roles/app actually expects. Everything
+  # else the app role needs (app_compose_dir, app_env, docker_service_user,
+  # ...) already comes from group_vars/all.yml and group_vars/app.yml the
+  # same way it does for the full playbook.yml run.
+  vars:
+    app_full_image: "{{ image }}"
+    registry_login_server: "{{ acr_login_server }}"
+    registry_username: "{{ acr_username }}"
+    registry_password: "{{ acr_password }}"
+
+  roles:
+    - role: app

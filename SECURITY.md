@@ -64,9 +64,26 @@ removed — tfsec now **hard-fails** the pipeline on any new IaC issue.
 - **Disk encryption**: Azure encrypts managed disks at rest by default
   (platform-managed keys); noted explicitly in `modules/compute/main.tf` so
   it's visible to reviewers instead of being an invisible default.
+- **Container registry access**: `terraform/modules/registry/main.tf` sets
+  `admin_enabled = true` on the ACR — a shared username/password credential,
+  rather than identity-based access (e.g. a managed identity with `AcrPull`/
+  `AcrPush`). **Accepted tradeoff**, same reasoning as the open app port:
+  it keeps the CD pipeline's `docker login` step simple for a small student
+  team, at the cost of a shared credential instead of per-identity, auditable
+  access. Rotate the admin password (`az acr credential renew`) if it's ever
+  suspected to have leaked, since — unlike a managed identity — anyone with
+  it can push/pull until it's rotated.
+- **CD's Azure credentials**: no long-lived secret at all — the CD pipeline
+  authenticates via an OIDC federated credential (`azure/login@v2` with only
+  `client-id`/`tenant-id`/`subscription-id`, no `client-secret`), trusted
+  only for `repo:Larissanoella-05/DevOps:ref:refs/heads/main`. Its Azure
+  role assignments are scoped narrowly: `AcrPush` on the resource group, and
+  `Network Contributor` on the bastion's NSG specifically (not the resource
+  group) so it can temporarily allow its own runner IP through for the
+  Ansible deploy step, and nothing broader.
 
 ## Reporting a vulnerability
 
-This is a student project (ALU Formative 3). If you find a security issue,
-open a GitHub issue or contact the maintainers directly rather than a public
-disclosure.
+This is a student project (ALU Summative, building on Formatives 1–3). If
+you find a security issue, open a GitHub issue or contact the maintainers
+directly rather than a public disclosure.
