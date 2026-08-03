@@ -150,9 +150,17 @@ jobs:
             --name "$TEMP_RULE_NAME" \
             -o table
 
+      # Queries the public IP resource directly (Microsoft.Network) rather
+      # than "az vm show" (Microsoft.Compute) -- this identity is deliberately
+      # scoped to Network Contributor + AcrPush only (see SECURITY.md), not
+      # Reader/VM Contributor, so "az vm show" fails with AuthorizationFailed
+      # here even though the same query works fine from a personal account
+      # with broader access. The public IP's own name is fixed by Terraform
+      # (modules/bastion/main.tf: "${var.name}-bastion-pip"), so this needs
+      # no extra permissions at all.
       - name: Diagnostic - confirm BASTION_IP secret matches the live bastion IP
         run: |
-          LIVE_BASTION_IP="$(az vm show -d --resource-group "$RESOURCE_GROUP" --name agripulse-dev-bastion --query publicIps -o tsv)"
+          LIVE_BASTION_IP="$(az network public-ip show --resource-group "$RESOURCE_GROUP" --name agripulse-dev-bastion-pip --query ipAddress -o tsv)"
           if [ "$LIVE_BASTION_IP" = "${{ secrets.BASTION_IP }}" ]; then
             echo "BASTION_IP secret matches the live bastion public IP."
           else
