@@ -4,6 +4,13 @@ on:
   push:
     branches:
       - main
+  # GitHub Actions can reuse stale/empty outputs from a previous attempt
+  # when a run is re-run (github.com/actions/runner#2598) -- hit this
+  # directly: build-and-push succeeded on attempt 7, but the deploy job
+  # still saw an empty needs.build-and-push.outputs.image. Clicking
+  # "Re-run" on an already-retried run keeps compounding that. This gives
+  # a way to start a genuine attempt 1 without needing a throwaway commit.
+  workflow_dispatch:
 
 permissions:
   id-token: write
