@@ -76,8 +76,7 @@ jobs:
       - name: Set image output
         id: set-image
         run: |
-          echo "image=${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}" >> "$GITHUB_OUTPUT"
-
+          echo "image=${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}" >> "$GITHUB_OUTPUT"
   # Step 5: Deploy via Ansible through bastion
   deploy:
     name: Deploy via Ansible
@@ -236,44 +235,10 @@ jobs:
 
       - name: Run Ansible deploy playbook
         run: |
-          # --private-key tells Ansible which key to use. inventory.ini no
-          # longer hardcodes ansible_ssh_private_key_file (it used to,
-          # pointing at ~/.ssh/id_ed25519) -- that inventory-level setting
-          # actually takes precedence over --private-key, not the other way
-          # around, which silently broke every CD deploy: id_ed25519 never
-          # existed on this runner, only the id_rsa written above. Confirmed
-          # via -vvv output showing the wrong IdentityFile being used, and
-          # fixed by removing the hardcoded path from inventory.ini instead.
-          # Still investigating a second cause -- see the diagnostic step
-          # above and -vvv here.
-          ansible-playbook -i inventory.ini deploy.yml -vvv \
+          ansible-playbook -i inventory.ini deploy.yml \
             --private-key ~/.ssh/id_rsa \
-            --extra-vars "image=${{ needs.build-and-push.outputs.image }}" \
+            --extra-vars "image=${{ secrets.ACR_LOGIN_SERVER }}/${{ needs.build-and-push.outputs.image }}" \
             --extra-vars "acr_login_server=${{ secrets.ACR_LOGIN_SERVER }}" \
             --extra-vars "acr_username=${{ secrets.ACR_USERNAME }}" \
             --extra-vars "acr_password=${{ secrets.ACR_PASSWORD }}"
         working-directory: ansible
-
-      # Runs even if the deploy above failed -- the door must not stay open
-      # just because something else went wrong. Retried for the same
-      # az-CLI-deadlock reason as the create step above: this cleanup must
-      # not silently no-op just because it hit the same transient bug.
-      - name: Remove this runner's temporary NSG rule
-        if: always()
-        run: |
-          success=false
-          for attempt in 1 2 3; do
-            if az network nsg rule delete \
-              --resource-group "$RESOURCE_GROUP" \
-              --nsg-name "$NSG_NAME" \
-              --name "$TEMP_RULE_NAME"; then
-              success=true
-              break
-            fi
-            echo "::warning::az network nsg rule delete failed (attempt $attempt/3), retrying in 5s..."
-            sleep 5
-          done
-          if [ "$success" != true ]; then
-            echo "::error::az network nsg rule delete failed after 3 attempts -- the temporary rule may still be open, check manually"
-            exit 1
-          fi
