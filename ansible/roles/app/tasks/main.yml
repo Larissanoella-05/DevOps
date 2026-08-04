@@ -1,4 +1,17 @@
 ---
+- name: Ensure a full application image reference was provided
+  ansible.builtin.assert:
+    that:
+      - app_full_image is defined
+      - app_full_image | length > 0
+      - not app_full_image.startswith('/')
+    fail_msg: >-
+      app_full_image is empty or malformed ("{{ app_full_image | default('') }}").
+      This usually means the "image" extra-var was blank when ansible-playbook
+      ran -- check that needs.build-and-push.outputs.image was actually
+      populated in cd.yml (a known gotcha after "Re-run failed jobs").
+    success_msg: "Deploying image: {{ app_full_image }}"
+
 - name: Create application directories
   ansible.builtin.file:
     path: "{{ item }}"
@@ -65,3 +78,4 @@
           The AgriPulse container did not start cleanly on {{ inventory_hostname }}.
           Recent logs:
           {{ app_compose_logs.stdout | default('unavailable') }}
+          {{ ('stderr: ' + app_compose_logs.stderr) if app_compose_logs.stderr | default('') else '' }}

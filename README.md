@@ -341,6 +341,11 @@ step and nothing more. More detail in [SECURITY.md](SECURITY.md).
 
 [Attendance tracker ](https://docs.google.com/spreadsheets/d/1M121T9ddVaMRLpsY1mCgOKTSb2j2lZaEzWKaoS6PIdM/edit?usp=sharing)
 
+
+## Demo Video
+
+[ Watch Demo Video](https://drive.google.com/drive/folders/1OimMTxARGeHqXD4DPYCcjWVZx-UM_p0C?usp=sharing)
+
 ## License
 
 MIT License. See the [LICENSE](LICENSE) file.

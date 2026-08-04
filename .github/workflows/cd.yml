@@ -4,6 +4,13 @@ on:
   push:
     branches:
       - main
+  # GitHub Actions can reuse stale/empty outputs from a previous attempt
+  # when a run is re-run (github.com/actions/runner#2598) -- hit this
+  # directly: build-and-push succeeded on attempt 7, but the deploy job
+  # still saw an empty needs.build-and-push.outputs.image. Clicking
+  # "Re-run" on an already-retried run keeps compounding that. This gives
+  # a way to start a genuine attempt 1 without needing a throwaway commit.
+  workflow_dispatch:
 
 permissions:
   id-token: write
@@ -69,8 +76,7 @@ jobs:
       - name: Set image output
         id: set-image
         run: |
-          echo "image=${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}" >> "$GITHUB_OUTPUT"
-
+          echo "image=${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}" >> "$GITHUB_OUTPUT"
   # Step 5: Deploy via Ansible through bastion
   deploy:
     name: Deploy via Ansible
@@ -105,17 +111,68 @@ jobs:
         run: |
           RUNNER_IP="$(curl -s -4 https://api.ipify.org)/32"
           echo "RUNNER_IP=$RUNNER_IP" >> "$GITHUB_ENV"
-          az network nsg rule create \
+
+          # az CLI on this runner has hit a genuine upstream bug: a Python
+          # import deadlock inside MSAL's lazy "import requests" from a
+          # background credential-polling thread
+          # (_frozen_importlib._DeadlockError, seen on Python 3.14). Not
+          # anything in our config -- it's intermittent, and retrying is
+          # the accepted mitigation for this specific class of az CLI
+          # flakiness rather than something we can fix on our end.
+          success=false
+          for attempt in 1 2 3; do
+            if az network nsg rule create \
+              --resource-group "$RESOURCE_GROUP" \
+              --nsg-name "$NSG_NAME" \
+              --name "$TEMP_RULE_NAME" \
+              --priority 100 \
+              --direction Inbound \
+              --access Allow \
+              --protocol Tcp \
+              --destination-port-ranges 22 \
+              --source-address-prefixes "$RUNNER_IP" \
+              --output none; then
+              success=true
+              break
+            fi
+            echo "::warning::az network nsg rule create failed (attempt $attempt/3), retrying in 5s..."
+            sleep 5
+          done
+          if [ "$success" != true ]; then
+            echo "::error::az network nsg rule create failed after 3 attempts"
+            exit 1
+          fi
+
+      # Direct SSH to the bastion still times out even with a confirmed-correct
+      # source IP (see the diagnostic step further down). The two remaining
+      # explanations are: (a) BASTION_IP is stale and doesn't point at the real
+      # bastion, or (b) the temp rule above isn't actually landing where we
+      # think. This settles both without needing anyone to check Azure by hand.
+      - name: Diagnostic - confirm the temp NSG rule actually exists as expected
+        run: |
+          az network nsg rule show \
             --resource-group "$RESOURCE_GROUP" \
             --nsg-name "$NSG_NAME" \
             --name "$TEMP_RULE_NAME" \
-            --priority 100 \
-            --direction Inbound \
-            --access Allow \
-            --protocol Tcp \
-            --destination-port-ranges 22 \
-            --source-address-prefixes "$RUNNER_IP" \
-            --output none
+            -o table
+
+      # Queries the public IP resource directly (Microsoft.Network) rather
+      # than "az vm show" (Microsoft.Compute) -- this identity is deliberately
+      # scoped to Network Contributor + AcrPush only (see SECURITY.md), not
+      # Reader/VM Contributor, so "az vm show" fails with AuthorizationFailed
+      # here even though the same query works fine from a personal account
+      # with broader access. The public IP's own name is fixed by Terraform
+      # (modules/bastion/main.tf: "${var.name}-bastion-pip"), so this needs
+      # no extra permissions at all.
+      - name: Diagnostic - confirm BASTION_IP secret matches the live bastion IP
+        run: |
+          LIVE_BASTION_IP="$(az network public-ip show --resource-group "$RESOURCE_GROUP" --name agripulse-dev-bastion-pip --query ipAddress -o tsv)"
+          if [ "$LIVE_BASTION_IP" = "${{ secrets.BASTION_IP }}" ]; then
+            echo "BASTION_IP secret matches the live bastion public IP."
+          else
+            echo "::error::BASTION_IP secret does NOT match the live bastion's actual public IP -- update the BASTION_IP secret."
+            exit 1
+          fi
 
       - name: Install Ansible
         run: |
@@ -135,26 +192,53 @@ jobs:
           echo "${{ secrets.VM_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
 
+      # TEMPORARY diagnostic. The direct-SSH test below timed out completely
+      # (pure network timeout, not an auth error) even though this exact
+      # runner's IP was just allowed through the NSG. Leading theory:
+      # GitHub-hosted runners don't guarantee the same outbound IP for two
+      # separate connections in the same job -- the IP curl detected for the
+      # NSG rule may not be the IP actually used when ssh connects moments
+      # later. This re-checks the IP right before the SSH attempt and
+      # compares it to $RUNNER_IP (set two steps ago) to confirm or rule
+      # that out directly, instead of assuming it.
+      - name: Diagnostic - re-check outbound IP, then direct SSH to bastion
+        run: |
+          CURRENT_IP="$(curl -s -4 https://api.ipify.org)"
+          echo "RUNNER_IP used for the NSG rule: $RUNNER_IP"
+          echo "Outbound IP right now:           $CURRENT_IP/32"
+          if [ "$RUNNER_IP" != "$CURRENT_IP/32" ]; then
+            echo "::error::IP MISMATCH -- the NSG rule allows $RUNNER_IP but this runner is now egressing as $CURRENT_IP/32. This is almost certainly the actual bug."
+          else
+            echo "IPs match -- ruling out the IP-instability theory."
+          fi
+
+          ssh -vvv -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+            -i ~/.ssh/id_rsa ubuntu@${{ secrets.BASTION_IP }} 'echo BASTION_SSH_OK' \
+            2>&1 | tail -80 || echo "DIRECT SSH TO BASTION FAILED (see above)"
+
+      # GitHub Actions doesn't always reliably restore an upstream job's
+      # outputs when only failed jobs are re-run (a known platform gotcha,
+      # not something in our config) -- this bit us directly: a re-run left
+      # needs.build-and-push.outputs.image blank, which flowed silently all
+      # the way into a rendered docker-compose.yml with image: "", and only
+      # surfaced ~60s later as an opaque wait_for timeout with no useful
+      # logs (docker compose itself refuses to run against an empty image
+      # field, so even the rescue block's log collection came back empty).
+      # Failing here instead turns that into an immediate, actionable error.
+      - name: Verify the built image reference before deploying
+        run: |
+          if [ -z "${{ needs.build-and-push.outputs.image }}" ]; then
+            echo "::error::needs.build-and-push.outputs.image is empty -- refusing to deploy with a blank image reference. If this run was triggered by 'Re-run failed jobs', use 'Re-run all jobs' instead so build-and-push's outputs are regenerated rather than restored."
+            exit 1
+          fi
+          echo "Deploying image: ${{ needs.build-and-push.outputs.image }}"
+
       - name: Run Ansible deploy playbook
         run: |
-          # --private-key overrides whatever ansible_ssh_private_key_file
-          # happens to be committed in inventory.ini (that file reflects
-          # whoever last tested locally with their own key) so CD always
-          # uses the key it just wrote above, regardless of that.
           ansible-playbook -i inventory.ini deploy.yml \
             --private-key ~/.ssh/id_rsa \
-            --extra-vars "image=${{ needs.build-and-push.outputs.image }}" \
+            --extra-vars "image=${{ secrets.ACR_LOGIN_SERVER }}/${{ needs.build-and-push.outputs.image }}" \
             --extra-vars "acr_login_server=${{ secrets.ACR_LOGIN_SERVER }}" \
             --extra-vars "acr_username=${{ secrets.ACR_USERNAME }}" \
             --extra-vars "acr_password=${{ secrets.ACR_PASSWORD }}"
         working-directory: ansible
-
-      # Runs even if the deploy above failed -- the door must not stay open
-      # just because something else went wrong.
-      - name: Remove this runner's temporary NSG rule
-        if: always()
-        run: |
-          az network nsg rule delete \
-            --resource-group "$RESOURCE_GROUP" \
-            --nsg-name "$NSG_NAME" \
-            --name "$TEMP_RULE_NAME"
