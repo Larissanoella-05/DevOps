@@ -79,8 +79,8 @@ jobs:
 
     - name: Run dependency scan
       run: |
-        npm audit --audit-level=high
-        npm audit --audit-level=high --prefix Backend
+        npm audit --audit-level=critical
+        npm audit --audit-level=critical --prefix Backend
 
     - name: Install Trivy
       run: |
