@@ -143,6 +143,15 @@ jobs:
             exit 1
           fi
 
+          # The rule existing in Azure's API response doesn't mean it's been
+          # propagated to the actual network fabric yet -- confirmed directly:
+          # a run where "az network nsg rule show" showed the rule correctly
+          # in place, with the exact right IP, still had SSH time out ~40s
+          # later. Giving it a head start here before anything tries to
+          # connect is cheap insurance against that gap.
+          echo "Waiting for the NSG rule to propagate..."
+          sleep 20
+
       # Direct SSH to the bastion still times out even with a confirmed-correct
       # source IP (see the diagnostic step further down). The two remaining
       # explanations are: (a) BASTION_IP is stale and doesn't point at the real
@@ -233,12 +242,32 @@ jobs:
           fi
           echo "Deploying image: ${{ needs.build-and-push.outputs.image }}"
 
+      # Retried for the same reason as the NSG rule creation above: real runs
+      # have shown the runner's SSH connection to the bastion time out even
+      # with a confirmed-correct NSG rule already in place, most likely
+      # network-fabric propagation delay or transient flakiness on that
+      # path -- not anything in the playbook itself (once a connection goes
+      # through, the deploy has consistently succeeded). A short second
+      # attempt is cheap and turns a one-off blip back into a normal deploy
+      # instead of a failed run someone has to manually re-trigger.
       - name: Run Ansible deploy playbook
         run: |
-          ansible-playbook -i inventory.ini deploy.yml \
-            --private-key ~/.ssh/id_rsa \
-            --extra-vars "image=${{ secrets.ACR_LOGIN_SERVER }}/${{ needs.build-and-push.outputs.image }}" \
-            --extra-vars "acr_login_server=${{ secrets.ACR_LOGIN_SERVER }}" \
-            --extra-vars "acr_username=${{ secrets.ACR_USERNAME }}" \
-            --extra-vars "acr_password=${{ secrets.ACR_PASSWORD }}"
+          success=false
+          for attempt in 1 2; do
+            if ansible-playbook -i inventory.ini deploy.yml \
+              --private-key ~/.ssh/id_rsa \
+              --extra-vars "image=${{ secrets.ACR_LOGIN_SERVER }}/${{ needs.build-and-push.outputs.image }}" \
+              --extra-vars "acr_login_server=${{ secrets.ACR_LOGIN_SERVER }}" \
+              --extra-vars "acr_username=${{ secrets.ACR_USERNAME }}" \
+              --extra-vars "acr_password=${{ secrets.ACR_PASSWORD }}"; then
+              success=true
+              break
+            fi
+            echo "::warning::ansible-playbook deploy failed (attempt $attempt/2), waiting 15s before retrying..."
+            sleep 15
+          done
+          if [ "$success" != true ]; then
+            echo "::error::ansible-playbook deploy failed after 2 attempts"
+            exit 1
+          fi
         working-directory: ansible
