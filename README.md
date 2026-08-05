@@ -2,7 +2,7 @@
 
 > Empowering African farmers and traders with real-time crop market prices.
 
-**Live app:** https://20.219.14.108.nip.io _(HTTPS with a real Let's Encrypt certificate. See [Live Deployment](#live-deployment) below.)_
+**Live app:** http://20.219.14.108:3000 _(see [Live Deployment](#live-deployment) below.)_
 
 ---
 
@@ -53,21 +53,21 @@ accessible platform to view and compare crop prices across different markets.
 | Config management  | Ansible                                                |
 | CI                 | GitHub Actions (lint, test, Trivy, tfsec, npm audit)   |
 | CD                 | GitHub Actions (build, push to ACR, deploy via Ansible)|
-| TLS                | nginx + Let's Encrypt, set up by Ansible               |
 
 ## Live Deployment
 
-**https://20.219.14.108.nip.io**
+**http://20.219.14.108:3000**
 
 The infrastructure is provisioned on demand with Terraform rather than
-hosted permanently, so the IP (and with it the URL, since it uses
-[nip.io](https://nip.io) to get a real hostname without a purchased domain)
-changes if the bastion is ever recreated. If the link above is down, the
-infrastructure probably just isn't deployed right now. See
-[terraform/README.md](terraform/README.md) to bring it back up.
+hosted permanently, so the IP changes if the bastion is ever recreated. If
+the link above is down, the infrastructure probably just isn't deployed
+right now. See [terraform/README.md](terraform/README.md) to bring it back
+up. TLS (nginx + Let's Encrypt on the bastion) is in progress on a separate
+branch and isn't part of this deployment yet, so the app is served over
+plain HTTP directly on its container port for now.
 
 ```bash
-curl https://20.219.14.108.nip.io/api/prices
+curl http://20.219.14.108:3000/api/prices
 ```
 
 ## Architecture
@@ -88,12 +88,12 @@ curl https://20.219.14.108.nip.io/api/prices
                                    │  Azure, provisioned by Terraform  │
                                    │                                    │
                                    │        internet                   │
-                                   │           │ HTTPS :443             │
+                                   │           │ HTTP :3000             │
                                    │           ▼                       │
                                    │   ┌─────────────────┐  public     │
                                    │   │ Bastion          │  subnet    │
-                                   │   │ nginx +          │            │
-                                   │   │ Let's Encrypt TLS│            │
+                                   │   │ nginx reverse    │            │
+                                   │   │ proxy            │            │
                                    │   └────────┬─────────┘            │
                                    │            │ proxy (VNet only)     │
                                    │            ▼                       │
@@ -114,7 +114,7 @@ curl https://20.219.14.108.nip.io/api/prices
 ```
 
 The app VM has **no public IP**. Only the bastion is internet-facing, and
-only on ports 22 (SSH, restricted to named admin IPs) and 80/443 (the app,
+only on ports 22 (SSH, restricted to named admin IPs) and 3000 (the app,
 proxied to the private VM). The database has no public endpoint either.
 Full detail lives in [terraform/README.md](terraform/README.md).
 
@@ -127,8 +127,8 @@ Full detail lives in [terraform/README.md](terraform/README.md).
   and remote state. See [terraform/README.md](terraform/README.md).
 - **[ansible/](ansible/)**: configures the provisioned VMs. Installs
   Docker, deploys the app with Docker Compose, hardens SSH and the
-  firewall on both hosts, and runs an nginx reverse proxy with a real
-  Let's Encrypt certificate on the bastion. See [ansible/README.md](ansible/README.md).
+  firewall on both hosts, and runs an nginx reverse proxy on the bastion.
+  See [ansible/README.md](ansible/README.md).
 - **[.github/workflows/cd.yml](.github/workflows/cd.yml)**: on every merge
   to `main`, runs the full CI suite, builds and pushes the image to Azure
   Container Registry, then deploys it by running the Ansible playbook
